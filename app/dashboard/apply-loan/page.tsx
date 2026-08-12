@@ -22,6 +22,11 @@ export default function ApplyLoanPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Modal & Terms States
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsPdfUrl, setTermsPdfUrl] = useState<string | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
   useEffect(() => {
     async function loadData() {
       const {
@@ -33,30 +38,38 @@ export default function ApplyLoanPage() {
         return;
       }
 
-      // Fetch user accounts, interest rates, and existing loans concurrently
-      const [{ data: accountsData }, { data: rateData }, { data: existingLoans }] =
-        await Promise.all([
-          supabase
-            .from("coop_accounts")
-            .select("id, account_name")
-            .eq("profile_id", user.id)
-            .order("created_at", { ascending: true }),
-          supabase.rpc("get_loan_rates"),
-          supabase
-            .from("loans")
-            .select("account_id, status")
-            .in("status", [
-              "pending",
-              "approved",
-              "active",
-              "disbursed",
-              "Pending",
-              "Approved",
-              "Active",
-            ]),
-        ]);
+      // Fetch accounts, interest rates, existing loans, AND active terms PDF URL
+      const [
+        { data: accountsData },
+        { data: rateData },
+        { data: existingLoans },
+        { data: termsData },
+      ] = await Promise.all([
+        supabase
+          .from("coop_accounts")
+          .select("id, account_name")
+          .eq("profile_id", user.id)
+          .order("created_at", { ascending: true }),
+        supabase.rpc("get_loan_rates"),
+        supabase
+          .from("loans")
+          .select("account_id, status")
+          .in("status", [
+            "pending",
+            "approved",
+            "active",
+            "disbursed",
+            "Pending",
+            "Approved",
+            "Active",
+          ]),
+        supabase
+          .from("system_settings")
+          .select("value")
+          .eq("key", "loan_terms_pdf_url")
+          .single(),
+      ]);
 
-      // Set set of account IDs that currently have an ongoing or pending loan
       const activeAccountIdsWithLoans = new Set(
         (existingLoans ?? []).map((l) => l.account_id)
       );
@@ -68,7 +81,6 @@ export default function ApplyLoanPage() {
 
       setAccounts(mappedAccounts);
 
-      // Select the first eligible account (without an active loan)
       const eligibleAccount = mappedAccounts.find((a) => !a.hasActiveLoan);
       if (eligibleAccount) {
         setAccountId(eligibleAccount.id);
@@ -79,13 +91,19 @@ export default function ApplyLoanPage() {
       if (rateData && rateData.length > 0) {
         setRate(Number(rateData[0].base_rate));
       }
+
+      if (termsData?.value) {
+        setTermsPdfUrl(termsData.value);
+      }
+
       setLoadingData(false);
     }
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Form submit handler -> Validates form and opens Terms Modal
+  function handlePreSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -112,7 +130,16 @@ export default function ApplyLoanPage() {
       return;
     }
 
+    // Validation passed -> Prompt terms modal
+    setShowTermsModal(true);
+  }
+
+  // Executes actual database insertion after Terms confirmation
+  async function handleFinalSubmit() {
+    if (!agreedToTerms) return;
+
     setLoading(true);
+    setShowTermsModal(false);
 
     const {
       data: { user },
@@ -124,7 +151,7 @@ export default function ApplyLoanPage() {
     }
 
     try {
-      const blob = await sigRef.current.getBlob();
+      const blob = await sigRef.current?.getBlob();
       if (!blob) throw new Error("Could not capture signature.");
 
       const path = `${user.id}/loan-${Date.now()}.png`;
@@ -189,7 +216,6 @@ export default function ApplyLoanPage() {
           boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.12)",
         }}
       >
-        {/* Navigation Link */}
         <Link
           href="/dashboard"
           style={{
@@ -206,7 +232,6 @@ export default function ApplyLoanPage() {
           ← Back to Dashboard
         </Link>
 
-        {/* Title Block */}
         <div style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>
             Apply for a Loan
@@ -218,7 +243,6 @@ export default function ApplyLoanPage() {
           </p>
         </div>
 
-        {/* Error Alert */}
         {error && (
           <div
             style={{
@@ -251,8 +275,7 @@ export default function ApplyLoanPage() {
             .
           </p>
         ) : (
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
-            {/* Account Selector */}
+          <form onSubmit={handlePreSubmit} style={{ display: "grid", gap: 16 }}>
             <div>
               <label
                 htmlFor="account"
@@ -294,7 +317,6 @@ export default function ApplyLoanPage() {
               </select>
             </div>
 
-            {/* Active Loan Warning Block */}
             {selectedAccObj?.hasActiveLoan && (
               <div
                 style={{
@@ -310,7 +332,6 @@ export default function ApplyLoanPage() {
               </div>
             )}
 
-            {/* Principal Amount */}
             <div>
               <label
                 htmlFor="principal"
@@ -346,7 +367,6 @@ export default function ApplyLoanPage() {
               />
             </div>
 
-            {/* Term Months */}
             <div>
               <label
                 htmlFor="termMonths"
@@ -381,7 +401,6 @@ export default function ApplyLoanPage() {
               />
             </div>
 
-            {/* Calculation Preview Card */}
             {rate !== null && principalNum > 0 && termNum > 0 && (
               <div
                 style={{
@@ -419,7 +438,6 @@ export default function ApplyLoanPage() {
               </div>
             )}
 
-            {/* Signature Area */}
             <div>
               <label
                 style={{
@@ -444,7 +462,6 @@ export default function ApplyLoanPage() {
               </div>
             </div>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading || selectedAccObj?.hasActiveLoan}
@@ -465,6 +482,124 @@ export default function ApplyLoanPage() {
           </form>
         )}
       </div>
+
+      {/* TERMS AND CONDITIONS MODAL */}
+      {showTermsModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              borderRadius: 16,
+              maxWidth: 600,
+              width: "100%",
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              padding: 24,
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.25)",
+            }}
+          >
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px" }}>
+              Loan Terms and Conditions
+            </h3>
+
+            {/* Embedded PDF Viewer */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 320,
+                border: "1px solid var(--border-color)",
+                borderRadius: 8,
+                overflow: "hidden",
+                marginBottom: 16,
+                background: "#f9fafb",
+              }}
+            >
+              {termsPdfUrl ? (
+                <iframe
+                  src={`${termsPdfUrl}#toolbar=0`}
+                  style={{ width: "100%", height: "100%", minHeight: 320, border: "none" }}
+                  title="Loan Terms Document"
+                />
+              ) : (
+                <div style={{ padding: 20, color: "var(--text-sub)", fontSize: 13, textAlign: "center" }}>
+                  No terms document has been uploaded yet. Please review standard cooperative loan rules.
+                </div>
+              )}
+            </div>
+
+            {/* Checkbox agreement */}
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                cursor: "pointer",
+                marginBottom: 20,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                style={{ width: 16, height: 16 }}
+              />
+              <span>I have read and agree to the Loan Terms and Conditions.</span>
+            </label>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTermsModal(false);
+                  setAgreedToTerms(false);
+                }}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-color)",
+                  background: "transparent",
+                  color: "var(--text-main)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!agreedToTerms}
+                onClick={handleFinalSubmit}
+                className="btn-approve-sm"
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  opacity: agreedToTerms ? 1 : 0.5,
+                  cursor: agreedToTerms ? "pointer" : "not-allowed",
+                }}
+              >
+                Confirm & Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
