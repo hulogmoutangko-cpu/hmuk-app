@@ -449,8 +449,8 @@ export default async function DashboardPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 12,
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: 8,
             }}
           >
             <Link
@@ -459,8 +459,8 @@ export default async function DashboardPage() {
             >
               <div
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   margin: "0 auto 6px",
                   borderRadius: "50%",
                   background: "var(--bg-card-hover)",
@@ -471,9 +471,9 @@ export default async function DashboardPage() {
                   color: "var(--text-main)",
                 }}
               >
-                <PlusCircle size={22} />
+                <PlusCircle size={20} />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-sub)" }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 + Account
               </span>
             </Link>
@@ -484,8 +484,8 @@ export default async function DashboardPage() {
             >
               <div
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   margin: "0 auto 6px",
                   borderRadius: "50%",
                   background: "var(--bg-card-hover)",
@@ -496,9 +496,9 @@ export default async function DashboardPage() {
                   color: "var(--text-main)",
                 }}
               >
-                <PiggyBank size={22} />
+                <PiggyBank size={20} />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-sub)" }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Deposit
               </span>
             </Link>
@@ -509,8 +509,8 @@ export default async function DashboardPage() {
             >
               <div
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   margin: "0 auto 6px",
                   borderRadius: "50%",
                   background: "var(--bg-card-hover)",
@@ -521,9 +521,9 @@ export default async function DashboardPage() {
                   color: "var(--text-main)",
                 }}
               >
-                <FileText size={22} />
+                <FileText size={20} />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-sub)" }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Apply Loan
               </span>
             </Link>
@@ -534,8 +534,8 @@ export default async function DashboardPage() {
             >
               <div
                 style={{
-                  width: 52,
-                  height: 52,
+                  width: 48,
+                  height: 48,
                   margin: "0 auto 6px",
                   borderRadius: "50%",
                   background: "var(--bg-card-hover)",
@@ -546,10 +546,35 @@ export default async function DashboardPage() {
                   color: "var(--text-main)",
                 }}
               >
-                <DollarSign size={22} />
+                <DollarSign size={20} />
               </div>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-sub)" }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Pay Loan
+              </span>
+            </Link>
+
+            <Link
+              href="/dashboard/history"
+              style={{ textDecoration: "none", textAlign: "center" }}
+            >
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  margin: "0 auto 6px",
+                  borderRadius: "50%",
+                  background: "var(--bg-card-hover)",
+                  border: "1px solid var(--border-color)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--text-main)",
+                }}
+              >
+                <TrendingUp size={20} />
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+                History
               </span>
             </Link>
           </div>
