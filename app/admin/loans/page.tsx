@@ -1,19 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import AdminNav from "../admin-nav";
+import { Printer, FileText, CheckCircle2, XCircle, Eye } from "lucide-react";
+
+type LoanStatus = "pending" | "active" | "completed";
 
 type Row = {
   id: string;
+  status: string;
   borrower_type: "member" | "non_member";
   borrower_name: string | null;
   borrower_contact: string | null;
   principal_amount: number;
+  term_months: number;
   base_interest_rate: number;
   referral_fee_rate: number;
   signature_url: string;
+  applied_at: string;
   coop_accounts: {
     account_name: string;
     profiles: { first_name: string | null; last_name: string | null } | null;
@@ -30,24 +36,36 @@ function fmt(amount: number) {
 
 export default function AdminLoansPage() {
   const supabase = createClient();
+  const [activeTab, setActiveTab] = useState<LoanStatus>("pending");
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeSignature, setActiveSignature] = useState<string | null>(null);
 
-  async function load() {
+  // Modals state
+  const [activeSignature, setActiveSignature] = useState<string | null>(null);
+  const [selectedContractLoan, setSelectedContractLoan] = useState<Row | null>(null);
+
+  async function load(status: LoanStatus) {
     setLoading(true);
+    setError(null);
+
+    // Map tab values to DB status matching
+    let statusFilter = [status];
+    if (status === "pending") statusFilter = ["pending", "Pending"];
+    if (status === "active") statusFilter = ["active", "approved", "disbursed", "Active"];
+    if (status === "completed") statusFilter = ["completed", "settled", "Completed"];
+
     const { data, error } = await supabase
       .from("loans")
       .select(
-        `id, borrower_type, borrower_name, borrower_contact,
-         principal_amount, base_interest_rate, referral_fee_rate, signature_url,
+        `id, status, borrower_type, borrower_name, borrower_contact,
+         principal_amount, term_months, base_interest_rate, referral_fee_rate, signature_url, applied_at,
          coop_accounts(account_name, profiles(first_name,last_name)),
          referrer:referred_by(first_name,last_name)`
       )
-      .eq("status", "pending")
-      .order("applied_at", { ascending: true });
+      .in("status", statusFilter)
+      .order("applied_at", { ascending: false });
 
     if (error) setError(error.message);
     setRows((data as any) ?? []);
@@ -55,11 +73,11 @@ export default function AdminLoansPage() {
   }
 
   useEffect(() => {
-    load();
+    load(activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeTab]);
 
-  async function act(id: string, status: "approved" | "rejected") {
+  async function act(id: string, status: "approved" | "rejected" | "completed") {
     setActingId(id);
     setError(null);
     const { error } = await supabase
@@ -70,16 +88,22 @@ export default function AdminLoansPage() {
     if (error) {
       setError(error.message);
     } else {
-      await load();
+      await load(activeTab);
     }
     setActingId(null);
   }
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div>
-      <AdminNav />
+      <div className="no-print">
+        <AdminNav />
+      </div>
 
-      <div className="dashboard-container">
+      <div className="dashboard-container no-print">
         {/* Breadcrumb Navigation */}
         <div style={{ marginBottom: 12 }}>
           <Link
@@ -101,11 +125,44 @@ export default function AdminLoansPage() {
             ADMINISTRATION
           </span>
           <h1 style={{ fontSize: 24, fontWeight: 800, margin: "4px 0" }}>
-            Pending Loan Applications
+            Loan Management
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Review, approve, or reject pending loan applications.
+            Review pending applications, monitor active loans, and issue contracts.
           </p>
+        </div>
+
+        {/* Navigation Filter Tabs */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 20,
+            borderBottom: "1px solid var(--border-color)",
+            paddingBottom: 10,
+          }}
+        >
+          {(["pending", "active", "completed"] as LoanStatus[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                textTransform: "capitalize",
+                border: "none",
+                cursor: "pointer",
+                background:
+                  activeTab === tab ? "#3b82f6" : "var(--bg-card-hover)",
+                color: activeTab === tab ? "#ffffff" : "var(--text-main)",
+                transition: "all 0.2s ease",
+              }}
+            >
+              {tab} Applications
+            </button>
+          ))}
         </div>
 
         {error && (
@@ -126,8 +183,15 @@ export default function AdminLoansPage() {
 
         {/* Loading Indicator */}
         {loading && (
-          <div style={{ padding: 32, textAlign: "center", color: "var(--text-sub)", fontSize: 14 }}>
-            Loading pending applications...
+          <div
+            style={{
+              padding: 32,
+              textAlign: "center",
+              color: "var(--text-sub)",
+              fontSize: 14,
+            }}
+          >
+            Loading {activeTab} loan applications...
           </div>
         )}
 
@@ -143,7 +207,7 @@ export default function AdminLoansPage() {
               color: "var(--text-sub)",
             }}
           >
-            No pending loan applications right now.
+            No {activeTab} loan records found.
           </div>
         )}
 
@@ -226,8 +290,9 @@ export default function AdminLoansPage() {
                               type="button"
                               className="btn-secondary-sm"
                               onClick={() => setActiveSignature(r.signature_url)}
+                              style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
                             >
-                              View Sig
+                              <Eye size={12} /> View Sig
                             </button>
                           ) : (
                             <span style={{ color: "var(--text-sub)", fontSize: 12 }}>—</span>
@@ -241,20 +306,56 @@ export default function AdminLoansPage() {
                               justifyContent: "flex-end",
                             }}
                           >
+                            {/* Contract Generator Button */}
                             <button
-                              disabled={actingId === r.id}
-                              onClick={() => act(r.id, "approved")}
-                              className="btn-approve-sm"
+                              type="button"
+                              onClick={() => setSelectedContractLoan(r)}
+                              style={{
+                                padding: "6px 12px",
+                                borderRadius: 6,
+                                background: "#4f46e5",
+                                color: "#ffffff",
+                                border: "none",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                              }}
                             >
-                              {actingId === r.id ? "..." : "Approve"}
+                              <FileText size={13} /> Contract
                             </button>
-                            <button
-                              disabled={actingId === r.id}
-                              onClick={() => act(r.id, "rejected")}
-                              className="btn-reject-sm"
-                            >
-                              {actingId === r.id ? "..." : "Reject"}
-                            </button>
+
+                            {/* Conditional Action Buttons Based on Tab Status */}
+                            {activeTab === "pending" && (
+                              <>
+                                <button
+                                  disabled={actingId === r.id}
+                                  onClick={() => act(r.id, "approved")}
+                                  className="btn-approve-sm"
+                                >
+                                  {actingId === r.id ? "..." : "Approve"}
+                                </button>
+                                <button
+                                  disabled={actingId === r.id}
+                                  onClick={() => act(r.id, "rejected")}
+                                  className="btn-reject-sm"
+                                >
+                                  {actingId === r.id ? "..." : "Reject"}
+                                </button>
+                              </>
+                            )}
+
+                            {activeTab === "active" && (
+                              <button
+                                disabled={actingId === r.id}
+                                onClick={() => act(r.id, "completed")}
+                                className="btn-approve-sm"
+                              >
+                                Mark Completed
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -265,117 +366,9 @@ export default function AdminLoansPage() {
             </div>
           </div>
         )}
-
-        {/* Mobile View: Responsive Cards */}
-        {!loading && rows.length > 0 && (
-          <div className="mobile-card-list">
-            {rows.map((r) => {
-              const borrowerName =
-                r.borrower_type === "member"
-                  ? [
-                      r.coop_accounts?.profiles?.first_name,
-                      r.coop_accounts?.profiles?.last_name,
-                    ]
-                      .filter(Boolean)
-                      .join(" ") || "Member"
-                  : r.borrower_name || "Non-Member";
-
-              const totalRate = (
-                Number(r.base_interest_rate || 0) +
-                Number(r.referral_fee_rate || 0)
-              ).toFixed(2);
-
-              const referrerName = [
-                r.referrer?.first_name,
-                r.referrer?.last_name,
-              ]
-                .filter(Boolean)
-                .join(" ");
-
-              return (
-                <div key={r.id} className="mobile-member-card">
-                  <div className="mobile-member-header">
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{borrowerName}</div>
-                      {r.borrower_type === "non_member" && (
-                        <div style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 2 }}>
-                          {r.borrower_contact ?? "No Contact"}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`badge ${
-                        r.borrower_type === "member" ? "user" : "admin"
-                      }`}
-                    >
-                      {r.borrower_type === "member" ? "Member" : "Referred"}
-                    </span>
-                  </div>
-
-                  <div className="mobile-member-details">
-                    <div className="detail-row">
-                      <span>Principal Amount</span>
-                      <strong style={{ fontSize: 15 }}>{fmt(r.principal_amount)}</strong>
-                    </div>
-                    <div className="detail-row">
-                      <span>Monthly Interest</span>
-                      <code>{totalRate}% / mo</code>
-                    </div>
-                    {r.borrower_type === "non_member" && referrerName && (
-                      <div className="detail-row">
-                        <span>Referred By</span>
-                        <span style={{ color: "var(--text-main)" }}>{referrerName}</span>
-                      </div>
-                    )}
-                    <div className="detail-row">
-                      <span>Signature</span>
-                      {r.signature_url ? (
-                        <button
-                          type="button"
-                          className="btn-secondary-sm"
-                          onClick={() => setActiveSignature(r.signature_url)}
-                        >
-                          View Signature
-                        </button>
-                      ) : (
-                        <span>—</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 8,
-                      marginTop: 14,
-                    }}
-                  >
-                    <button
-                      disabled={actingId === r.id}
-                      onClick={() => act(r.id, "approved")}
-                      className="btn-approve-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
-                    >
-                      {actingId === r.id ? "Processing..." : "Approve"}
-                    </button>
-                    <button
-                      disabled={actingId === r.id}
-                      onClick={() => act(r.id, "rejected")}
-                      className="btn-reject-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
-                    >
-                      {actingId === r.id ? "Processing..." : "Reject"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
-      {/* Signature Lightbox Modal */}
+      {/* Signature Modal */}
       {activeSignature && (
         <div
           style={{
@@ -411,7 +404,6 @@ export default function AdminLoansPage() {
                 marginBottom: 16,
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={activeSignature}
                 alt="Signature"
@@ -428,6 +420,258 @@ export default function AdminLoansPage() {
           </div>
         </div>
       )}
+
+      {/* Printable Dual Copy Contract Modal */}
+      {selectedContractLoan && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            justifyContent: "center",
+            padding: 20,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              color: "#000000",
+              width: "100%",
+              maxWidth: "800px",
+              padding: "40px",
+              borderRadius: "8px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+            className="printable-contract"
+          >
+            {/* Modal Actions Bar (Hidden on print) */}
+            <div
+              className="no-print"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 20,
+                paddingBottom: 12,
+                borderBottom: "1px solid #e5e7eb",
+              }}
+            >
+              <button
+                type="button"
+                onClick={handlePrint}
+                style={{
+                  background: "#2563eb",
+                  color: "#fff",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Printer size={16} /> Print / Export to PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedContractLoan(null)}
+                style={{
+                  background: "#e5e7eb",
+                  color: "#374151",
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "none",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Contract Body Render Function */}
+            <ContractView loan={selectedContractLoan} copyType="CO-OP COPY" />
+            <div
+              style={{
+                borderTop: "2px dashed #9ca3af",
+                margin: "40px 0",
+                position: "relative",
+              }}
+              className="cut-line"
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-12px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  background: "#fff",
+                  padding: "0 10px",
+                  fontSize: "12px",
+                  color: "#6b7280",
+                }}
+              >
+                ✂ Cut along line
+              </span>
+            </div>
+            <ContractView loan={selectedContractLoan} copyType="MEMBER / BORROWER COPY" />
+          </div>
+
+          {/* CSS Print Styles */}
+          <style jsx global>{`
+            @media print {
+              body * {
+                visibility: hidden;
+              }
+              .no-print {
+                display: none !important;
+              }
+              .printable-contract,
+              .printable-contract * {
+                visibility: visible;
+              }
+              .printable-contract {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                max-width: 100% !important;
+                padding: 0 !important;
+                background: white !important;
+                color: black !important;
+              }
+            }
+          `}</style>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sub-component rendering individual contract copy layout
+function ContractView({ loan, copyType }: { loan: Row; copyType: string }) {
+  const borrowerName =
+    loan.borrower_type === "member"
+      ? [
+          loan.coop_accounts?.profiles?.first_name,
+          loan.coop_accounts?.profiles?.last_name,
+        ]
+          .filter(Boolean)
+          .join(" ") || "Member"
+      : loan.borrower_name || "Non-Member";
+
+  const totalRate = (
+    Number(loan.base_interest_rate || 0) + Number(loan.referral_fee_rate || 0)
+  ).toFixed(2);
+
+  return (
+    <div style={{ padding: "10px 0", fontSize: "13px", lineHeight: "1.5" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: "18px", fontWeight: "bold", margin: 0 }}>
+            LOAN AGREEMENT CONTRACT
+          </h2>
+          <p style={{ margin: 0, color: "#4b5563", fontSize: "12px" }}>
+            Cooperative Credit Facilities
+          </p>
+        </div>
+        <span
+          style={{
+            border: "1px solid #000",
+            padding: "4px 8px",
+            fontSize: "11px",
+            fontWeight: "bold",
+            borderRadius: "4px",
+          }}
+        >
+          {copyType}
+        </span>
+      </div>
+
+      <p>
+        This Agreement is entered into on{" "}
+        <strong>{new Date(loan.applied_at || Date.now()).toLocaleDateString("en-PH")}</strong>, by and between the <strong>Cooperative Organization</strong> and the undersigned borrower:
+      </p>
+
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          margin: "12px 0",
+        }}
+      >
+        <tbody>
+          <tr>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db", fontWeight: "bold", width: "30%" }}>
+              Borrower Name:
+            </td>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db" }}>{borrowerName}</td>
+          </tr>
+          <tr>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db", fontWeight: "bold" }}>
+              Principal Amount:
+            </td>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db" }}>
+              ₱{Number(loan.principal_amount).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+            </td>
+          </tr>
+          <tr>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db", fontWeight: "bold" }}>
+              Interest Rate:
+            </td>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db" }}>{totalRate}% / Month</td>
+          </tr>
+          <tr>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db", fontWeight: "bold" }}>
+              Loan Duration:
+            </td>
+            <td style={{ padding: "6px", border: "1px solid #d1d5db" }}>{loan.term_months || 1} Months</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p style={{ fontSize: "11px", color: "#374151", margin: "12px 0" }}>
+        <strong>Terms:</strong> The borrower agrees to repay the total principal along with monthly accrued interest based on agreed timelines. Failure to comply with terms will incur appropriate penalty fees under cooperative guidelines.
+      </p>
+
+      {/* Signature Section */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "30px" }}>
+        <div style={{ width: "45%", textAlign: "center" }}>
+          {loan.signature_url ? (
+            <img
+              src={loan.signature_url}
+              alt="Borrower Signature"
+              style={{ maxHeight: "40px", marginBottom: "4px" }}
+            />
+          ) : (
+            <div style={{ height: "40px" }} />
+          )}
+          <div style={{ borderTop: "1px solid #000", paddingTop: "4px", fontWeight: "bold" }}>
+            {borrowerName}
+          </div>
+          <span style={{ fontSize: "11px", color: "#6b7280" }}>Borrower Signature</span>
+        </div>
+
+        <div style={{ width: "45%", textAlign: "center" }}>
+          <div style={{ height: "40px" }} />
+          <div style={{ borderTop: "1px solid #000", paddingTop: "4px", fontWeight: "bold" }}>
+            Authorized Co-op Officer
+          </div>
+          <span style={{ fontSize: "11px", color: "#6b7280" }}>Approved By</span>
+        </div>
+      </div>
     </div>
   );
 }
