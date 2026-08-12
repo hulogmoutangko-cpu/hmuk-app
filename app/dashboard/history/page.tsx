@@ -24,7 +24,7 @@ function fmt(amount: number) {
 function StatusBadge({ status }: { status: string }) {
   const normalized = (status || "pending").toLowerCase();
 
-  if (normalized === "approved" || normalized === "posted") {
+  if (normalized === "approved" || normalized === "posted" || normalized === "active") {
     return (
       <span
         style={{
@@ -39,7 +39,7 @@ function StatusBadge({ status }: { status: string }) {
           color: "#10b981",
         }}
       >
-        <CheckCircle2 size={12} /> Approved
+        <CheckCircle2 size={12} /> {status || "Approved"}
       </span>
     );
   }
@@ -120,8 +120,8 @@ export default async function HistoryPage() {
   let userLoans: any[] = [];
   let loanPaymentsGrouped: Record<string, any[]> = {};
 
+  // 2. Fetch Contributions
   if (accountIds.length > 0) {
-    // 2. Fetch contributions
     const { data: contribData } = await supabase
       .from("contributions")
       .select("id, account_id, amount, status, pay_date, post_date, signature_url")
@@ -129,33 +129,39 @@ export default async function HistoryPage() {
       .order("pay_date", { ascending: false });
 
     contributions = contribData ?? [];
+  }
 
-    // 3. Fetch user's full loan details
-    const { data: loans } = await supabase
-      .from("loans")
-      .select("id, principal_amount, balance, start_date, due_date, status")
-      .in("account_id", accountIds)
-      .order("created_at", { ascending: false });
+  // 3. Fetch Loans linked either by account_id OR referred_by = user.id
+  let loanQuery = supabase
+    .from("loans")
+    .select("id, account_id, borrower_name, borrower_type, principal_amount, status, applied_at, approved_at, term_months")
+    .order("applied_at", { ascending: false });
 
-    userLoans = loans ?? [];
-    const loanIds = userLoans.map((l) => l.id);
+  if (accountIds.length > 0) {
+    loanQuery = loanQuery.or(`account_id.in.(${accountIds.join(",")}),referred_by.eq.${user.id}`);
+  } else {
+    loanQuery = loanQuery.eq("referred_by", user.id);
+  }
 
-    if (loanIds.length > 0) {
-      // 4. Query loan payments
-      const { data: paymentData } = await supabase
-        .from("loan_payments")
-        .select("id, loan_id, total_amount, principal_portion, interest_portion, status, pay_date, signature_url")
-        .in("loan_id", loanIds)
-        .order("pay_date", { ascending: false });
+  const { data: loans } = await loanQuery;
+  userLoans = loans ?? [];
 
-      // Group payments by loan_id
-      (paymentData ?? []).forEach((payment) => {
-        if (!loanPaymentsGrouped[payment.loan_id]) {
-          loanPaymentsGrouped[payment.loan_id] = [];
-        }
-        loanPaymentsGrouped[payment.loan_id].push(payment);
-      });
-    }
+  const loanIds = userLoans.map((l) => l.id);
+
+  // 4. Fetch Loan Payments for retrieved loans
+  if (loanIds.length > 0) {
+    const { data: paymentData } = await supabase
+      .from("loan_payments")
+      .select("id, loan_id, total_amount, principal_portion, interest_portion, status, pay_date, signature_url")
+      .in("loan_id", loanIds)
+      .order("pay_date", { ascending: false });
+
+    (paymentData ?? []).forEach((payment) => {
+      if (!loanPaymentsGrouped[payment.loan_id]) {
+        loanPaymentsGrouped[payment.loan_id] = [];
+      }
+      loanPaymentsGrouped[payment.loan_id].push(payment);
+    });
   }
 
   return (
@@ -332,6 +338,29 @@ export default async function HistoryPage() {
           ) : (
             userLoans.map((loan) => {
               const payments = loanPaymentsGrouped[loan.id] || [];
+              
+              // Calculate total principal paid to determine current balance
+              const totalPrincipalPaid = payments.reduce(
+                (sum, p) => sum + Number(p.principal_portion || 0),
+                0
+              );
+              const remainingBalance = Math.max(
+                0,
+                Number(loan.principal_amount || 0) - totalPrincipalPaid
+              );
+
+              // Calculate start date & due date
+              const startDate = loan.approved_at || loan.applied_at;
+              let dueDateStr = "N/A";
+              if (startDate && loan.term_months) {
+                const d = new Date(startDate);
+                d.setMonth(d.getMonth() + Number(loan.term_months));
+                dueDateStr = d.toLocaleDateString("en-PH", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                });
+              }
 
               return (
                 <div
@@ -356,14 +385,14 @@ export default async function HistoryPage() {
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
-                        alignItems: "center",
+                        alignItems: "flex-start",
                         marginBottom: 12,
                       }}
                     >
                       <div>
-                        <span style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-sub)", letterSpacing: 0.5 }}>
-                          Loan Amount
-                        </span>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-sub)", marginBottom: 2 }}>
+                          {loan.borrower_name ? `Loan for ${loan.borrower_name}` : "Member Loan"}
+                        </div>
                         <div style={{ fontSize: 18, fontWeight: 800 }}>
                           {fmt(Number(loan.principal_amount))}
                         </div>
@@ -373,51 +402,47 @@ export default async function HistoryPage() {
                           Remaining Balance
                         </span>
                         <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>
-                          {fmt(Number(loan.balance))}
+                          {fmt(remainingBalance)}
                         </div>
                       </div>
                     </div>
 
-                    {/* Loan Dates */}
+                    {/* Loan Dates & Status */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 16,
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 12,
                         fontSize: 12,
                         color: "var(--text-sub)",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <Calendar size={13} />
-                        <span>
-                          Loan Date:{" "}
-                          <strong>
-                            {loan.start_date
-                              ? new Date(loan.start_date).toLocaleDateString("en-PH", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })
-                              : "N/A"}
-                          </strong>
-                        </span>
+                      <div style={{ display: "flex", gap: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <Calendar size={13} />
+                          <span>
+                            Start:{" "}
+                            <strong>
+                              {startDate
+                                ? new Date(startDate).toLocaleDateString("en-PH", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })
+                                : "N/A"}
+                            </strong>
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <Clock size={13} />
+                          <span>
+                            Due: <strong>{dueDateStr}</strong>
+                          </span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <Clock size={13} />
-                        <span>
-                          Due:{" "}
-                          <strong>
-                            {loan.due_date
-                              ? new Date(loan.due_date).toLocaleDateString("en-PH", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })
-                              : "N/A"}
-                          </strong>
-                        </span>
-                      </div>
+                      <StatusBadge status={loan.status} />
                     </div>
                   </div>
 
