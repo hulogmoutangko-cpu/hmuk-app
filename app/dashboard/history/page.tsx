@@ -10,6 +10,8 @@ import {
   Clock,
   XCircle,
   FileText,
+  Calendar,
+  Wallet,
 } from "lucide-react";
 
 function fmt(amount: number) {
@@ -115,10 +117,11 @@ export default async function HistoryPage() {
   const accountMap = new Map((accounts ?? []).map((a) => [a.id, a.account_name]));
 
   let contributions: any[] = [];
-  let loanPayments: any[] = [];
+  let userLoans: any[] = [];
+  let loanPaymentsGrouped: Record<string, any[]> = {};
 
   if (accountIds.length > 0) {
-    // 2. Query contributions with exact schema column names
+    // 2. Fetch contributions
     const { data: contribData } = await supabase
       .from("contributions")
       .select("id, account_id, amount, status, pay_date, post_date, signature_url")
@@ -127,23 +130,31 @@ export default async function HistoryPage() {
 
     contributions = contribData ?? [];
 
-    // 3. Get user's loans
+    // 3. Fetch user's full loan details
     const { data: loans } = await supabase
       .from("loans")
-      .select("id")
-      .in("account_id", accountIds);
+      .select("id, principal_amount, balance, start_date, due_date, status")
+      .in("account_id", accountIds)
+      .order("created_at", { ascending: false });
 
-    const loanIds = (loans ?? []).map((l) => l.id);
+    userLoans = loans ?? [];
+    const loanIds = userLoans.map((l) => l.id);
 
     if (loanIds.length > 0) {
       // 4. Query loan payments
       const { data: paymentData } = await supabase
         .from("loan_payments")
-        .select("id, loan_id, amount, status, created_at, receipt_url")
+        .select("id, loan_id, total_amount, principal_portion, interest_portion, status, pay_date, signature_url")
         .in("loan_id", loanIds)
-        .order("created_at", { ascending: false });
+        .order("pay_date", { ascending: false });
 
-      loanPayments = paymentData ?? [];
+      // Group payments by loan_id
+      (paymentData ?? []).forEach((payment) => {
+        if (!loanPaymentsGrouped[payment.loan_id]) {
+          loanPaymentsGrouped[payment.loan_id] = [];
+        }
+        loanPaymentsGrouped[payment.loan_id].push(payment);
+      });
     }
   }
 
@@ -287,7 +298,7 @@ export default async function HistoryPage() {
           </div>
         </div>
 
-        {/* Loan Payments Section */}
+        {/* Loans & Payments Section */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
@@ -301,89 +312,212 @@ export default async function HistoryPage() {
             }}
           >
             <CreditCard size={18} color="#f59e0b" />
-            <span>Loan Payments</span>
+            <span>Loans & Payments</span>
           </div>
 
-          <div
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-color)",
-              borderRadius: 16,
-              overflow: "hidden",
-            }}
-          >
-            {loanPayments.length === 0 ? (
-              <div
-                style={{
-                  padding: 24,
-                  textAlign: "center",
-                  color: "var(--text-sub)",
-                  fontSize: 13,
-                }}
-              >
-                No loan payment records found.
-              </div>
-            ) : (
-              loanPayments.map((p, idx) => (
+          {userLoans.length === 0 ? (
+            <div
+              style={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
+                borderRadius: 16,
+                padding: 24,
+                textAlign: "center",
+                color: "var(--text-sub)",
+                fontSize: 13,
+              }}
+            >
+              No active or past loans found.
+            </div>
+          ) : (
+            userLoans.map((loan) => {
+              const payments = loanPaymentsGrouped[loan.id] || [];
+
+              return (
                 <div
-                  key={p.id}
+                  key={loan.id}
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "14px 16px",
-                    borderBottom:
-                      idx < loanPayments.length - 1
-                        ? "1px solid var(--border-color)"
-                        : "none",
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: 16,
+                    overflow: "hidden",
+                    marginBottom: 16,
                   }}
                 >
-                  <div style={{ flex: 1 }}>
+                  {/* Loan Header Card Summary */}
+                  <div
+                    style={{
+                      padding: "16px",
+                      background: "rgba(245, 158, 11, 0.05)",
+                      borderBottom: "1px solid var(--border-color)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-sub)", letterSpacing: 0.5 }}>
+                          Loan Amount
+                        </span>
+                        <div style={{ fontSize: 18, fontWeight: 800 }}>
+                          {fmt(Number(loan.principal_amount))}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span style={{ fontSize: 11, textTransform: "uppercase", color: "var(--text-sub)", letterSpacing: 0.5 }}>
+                          Remaining Balance
+                        </span>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>
+                          {fmt(Number(loan.balance))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Loan Dates */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 8,
-                        marginBottom: 4,
+                        gap: 16,
+                        fontSize: 12,
+                        color: "var(--text-sub)",
                       }}
                     >
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>
-                        {fmt(Number(p.amount))}
-                      </span>
-                      <StatusBadge status={p.status} />
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-sub)" }}>
-                      Payment •{" "}
-                      {new Date(p.created_at).toLocaleDateString("en-PH", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <Calendar size={13} />
+                        <span>
+                          Loan Date:{" "}
+                          <strong>
+                            {loan.start_date
+                              ? new Date(loan.start_date).toLocaleDateString("en-PH", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })
+                              : "N/A"}
+                          </strong>
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <Clock size={13} />
+                        <span>
+                          Due:{" "}
+                          <strong>
+                            {loan.due_date
+                              ? new Date(loan.due_date).toLocaleDateString("en-PH", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })
+                              : "N/A"}
+                          </strong>
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  {p.receipt_url && (
-                    <a
-                      href={p.receipt_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  {/* Loan Payments Sub-list */}
+                  <div>
+                    <div
                       style={{
-                        color: "#3b82f6",
+                        padding: "10px 16px",
                         fontSize: 12,
-                        fontWeight: 600,
-                        textDecoration: "none",
+                        fontWeight: 700,
+                        color: "var(--text-sub)",
+                        background: "rgba(0, 0, 0, 0.02)",
+                        borderBottom: "1px solid var(--border-color)",
                         display: "flex",
                         alignItems: "center",
-                        gap: 4,
+                        gap: 6,
                       }}
                     >
-                      <FileText size={14} /> Receipt
-                    </a>
-                  )}
+                      <Wallet size={14} />
+                      <span>Payment History ({payments.length})</span>
+                    </div>
+
+                    {payments.length === 0 ? (
+                      <div
+                        style={{
+                          padding: 16,
+                          textAlign: "center",
+                          color: "var(--text-sub)",
+                          fontSize: 12,
+                        }}
+                      >
+                        No payment records submitted for this loan yet.
+                      </div>
+                    ) : (
+                      payments.map((p, idx) => (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "12px 16px",
+                            borderBottom:
+                              idx < payments.length - 1
+                                ? "1px solid var(--border-color)"
+                                : "none",
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                marginBottom: 2,
+                              }}
+                            >
+                              <span style={{ fontWeight: 700, fontSize: 14 }}>
+                                {fmt(Number(p.total_amount))}
+                              </span>
+                              <StatusBadge status={p.status} />
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--text-sub)" }}>
+                              Paid on:{" "}
+                              {p.pay_date
+                                ? new Date(p.pay_date).toLocaleDateString("en-PH", {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })
+                                : "No Date"}
+                            </div>
+                          </div>
+
+                          {p.signature_url && (
+                            <a
+                              href={p.signature_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                color: "#3b82f6",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                textDecoration: "none",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 4,
+                              }}
+                            >
+                              <FileText size={14} /> Receipt
+                            </a>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))
-            )}
-          </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
