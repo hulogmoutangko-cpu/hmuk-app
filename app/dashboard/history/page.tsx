@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/utils/supabase/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import {
   ArrowLeft,
   PiggyBank,
@@ -81,7 +82,21 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default async function HistoryPage() {
-  const supabase = createClient();
+  const cookieStore = await cookies();
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll() {},
+      },
+    }
+  );
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -90,7 +105,7 @@ export default async function HistoryPage() {
     redirect("/login");
   }
 
-  // Get user's coop account IDs
+  // 1. Fetch user's coop accounts
   const { data: accounts } = await supabase
     .from("coop_accounts")
     .select("id, account_name")
@@ -103,27 +118,28 @@ export default async function HistoryPage() {
   let loanPayments: any[] = [];
 
   if (accountIds.length > 0) {
-    // 1. Fetch member contributions (all statuses: pending, approved, rejected)
+    // 2. Query contributions with exact schema column names
     const { data: contribData } = await supabase
       .from("contributions")
-      .select("id, account_id, amount, status, created_at, receipt_url, payment_method")
+      .select("id, account_id, amount, status, pay_date, post_date, signature_url")
       .in("account_id", accountIds)
-      .order("created_at", { ascending: false });
+      .order("pay_date", { ascending: false });
 
     contributions = contribData ?? [];
 
-    // 2. Fetch member's loans and associated payments
+    // 3. Get user's loans
     const { data: loans } = await supabase
       .from("loans")
-      .select("id, account_id, loan_type")
+      .select("id")
       .in("account_id", accountIds);
 
     const loanIds = (loans ?? []).map((l) => l.id);
 
     if (loanIds.length > 0) {
+      // 4. Query loan payments
       const { data: paymentData } = await supabase
         .from("loan_payments")
-        .select("id, loan_id, amount, status, created_at, receipt_url, payment_method")
+        .select("id, loan_id, amount, status, created_at, receipt_url")
         .in("loan_id", loanIds)
         .order("created_at", { ascending: false });
 
@@ -170,7 +186,7 @@ export default async function HistoryPage() {
           </h1>
         </div>
 
-        {/* Contributions Section */}
+        {/* Contributions / Savings Section */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
@@ -237,17 +253,19 @@ export default async function HistoryPage() {
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text-sub)" }}>
                       {accountMap.get(c.account_id) || "Co-op Account"} •{" "}
-                      {new Date(c.created_at).toLocaleDateString("en-PH", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
+                      {c.pay_date
+                        ? new Date(c.pay_date).toLocaleDateString("en-PH", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })
+                        : "No Date"}
                     </div>
                   </div>
 
-                  {c.receipt_url && (
+                  {c.signature_url && (
                     <a
-                      href={c.receipt_url}
+                      href={c.signature_url}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -260,7 +278,7 @@ export default async function HistoryPage() {
                         gap: 4,
                       }}
                     >
-                      <FileText size={14} /> Receipt
+                      <FileText size={14} /> View File
                     </a>
                   )}
                 </div>
