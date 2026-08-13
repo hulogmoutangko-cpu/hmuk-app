@@ -33,6 +33,7 @@ export default function OneSignalInit({ userId }: { userId?: string }) {
       // OneSignal worker) instead of registering its own OneSignalSDKWorker.js
       // at the same root scope — avoids two service workers fighting for
       // control of "/", which was silently breaking push token issuance.
+    
       serviceWorkerParam: { scope: "/" },
       serviceWorkerPath: "sw.js",
     }).then(() => {
