@@ -5,22 +5,62 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import AdminNav from "../admin-nav";
 
-type Row = {
-  id: string;
-  amount: number;
-  pay_date: string;
-  signature_url: string;
-  coop_accounts: {
-    account_name: string;
-    profiles: { first_name: string | null; last_name: string | null } | null;
-  } | null;
+// Helper type to normalize Supabase relational structures (array vs single object)
+type SingleOrArray<T> = T | T[];
+
+type SupabaseProfile = {
+  first_name: string | null;
+  last_name: string | null;
 };
 
-function fmt(amount: number) {
+type SupabaseCoopAccount = {
+  account_name: string;
+  profiles: SingleOrArray<SupabaseProfile> | null;
+};
+
+type Row = {
+  id: string;
+  amount: number | null;
+  pay_date: string | null;
+  signature_url: string | null;
+  coop_accounts: SingleOrArray<SupabaseCoopAccount> | null;
+};
+
+function fmt(amount: number | null | undefined) {
   return Number(amount || 0).toLocaleString("en-PH", {
     style: "currency",
     currency: "PHP",
   });
+}
+
+// Safe helpers to extract normalized object data regardless of Supabase join structure
+function getCoopAccount(row: Row): SupabaseCoopAccount | null {
+  if (!row.coop_accounts) return null;
+  return Array.isArray(row.coop_accounts)
+    ? row.coop_accounts[0] ?? null
+    : row.coop_accounts;
+}
+
+function getProfile(account: SupabaseCoopAccount | null): SupabaseProfile | null {
+  if (!account?.profiles) return null;
+  return Array.isArray(account.profiles)
+    ? account.profiles[0] ?? null
+    : account.profiles;
+}
+
+function getMemberDetails(row: Row) {
+  const account = getCoopAccount(row);
+  const profile = getProfile(account);
+
+  const memberName =
+    [profile?.first_name, profile?.last_name]
+      .filter(Boolean)
+      .join(" ") || "Unnamed Member";
+
+  const initial = (profile?.first_name?.[0] || "M").toUpperCase();
+  const accountName = account?.account_name ?? "—";
+
+  return { memberName, initial, accountName };
 }
 
 export default function AdminContributionsPage() {
@@ -47,7 +87,7 @@ export default function AdminContributionsPage() {
       .order("created_at", { ascending: true });
 
     if (error) setError(error.message);
-    setRows((data as any) ?? []);
+    setRows((data as unknown as Row[]) ?? []);
     setSelectedIds([]);
     setLoading(false);
   }
@@ -57,17 +97,21 @@ export default function AdminContributionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Filter rows dynamically based on search input
+  // Filter rows dynamically based on search input with null-safe guards
   const filteredRows = useMemo(() => {
     if (!searchQuery.trim()) return rows;
     const query = searchQuery.toLowerCase();
     return rows.filter((r) => {
-      const name = `${r.coop_accounts?.profiles?.first_name || ""} ${
-        r.coop_accounts?.profiles?.last_name || ""
-      }`.toLowerCase();
-      const account = (r.coop_accounts?.account_name || "").toLowerCase();
-      const amount = r.amount.toString();
-      return name.includes(query) || account.includes(query) || amount.includes(query);
+      const { memberName, accountName } = getMemberDetails(r);
+      const name = memberName.toLowerCase();
+      const account = accountName.toLowerCase();
+      const amount = (r.amount ?? 0).toString();
+
+      return (
+        name.includes(query) ||
+        account.includes(query) ||
+        amount.includes(query)
+      );
     });
   }, [rows, searchQuery]);
 
@@ -181,7 +225,7 @@ export default function AdminContributionsPage() {
           </div>
         )}
 
-        {/* Controls Toolbar: Search & Batch Action Bar */}
+        {/* Controls Toolbar */}
         {!loading && rows.length > 0 && (
           <div
             style={{
@@ -296,18 +340,7 @@ export default function AdminContributionsPage() {
                 </thead>
                 <tbody>
                   {filteredRows.map((r) => {
-                    const memberName =
-                      [
-                        r.coop_accounts?.profiles?.first_name,
-                        r.coop_accounts?.profiles?.last_name,
-                      ]
-                        .filter(Boolean)
-                        .join(" ") || "Unnamed Member";
-
-                    const initial = (
-                      r.coop_accounts?.profiles?.first_name?.[0] || "M"
-                    ).toUpperCase();
-
+                    const { memberName, initial, accountName } = getMemberDetails(r);
                     const isChecked = selectedIds.includes(r.id);
 
                     return (
@@ -341,9 +374,7 @@ export default function AdminContributionsPage() {
                             <span style={{ fontWeight: 600 }}>{memberName}</span>
                           </div>
                         </td>
-                        <td style={{ color: "var(--text-sub)" }}>
-                          {r.coop_accounts?.account_name ?? "—"}
-                        </td>
+                        <td style={{ color: "var(--text-sub)" }}>{accountName}</td>
                         <td style={{ fontWeight: 700 }}>{fmt(r.amount)}</td>
                         <td style={{ color: "var(--text-sub)", fontSize: 13 }}>
                           {r.pay_date
@@ -394,7 +425,7 @@ export default function AdminContributionsPage() {
           </div>
         )}
 
-        {/* Mobile View: Cards with Select All option */}
+        {/* Mobile View: Cards */}
         {!loading && rows.length > 0 && (
           <div className="mobile-card-list">
             <div
@@ -419,18 +450,7 @@ export default function AdminContributionsPage() {
             </div>
 
             {filteredRows.map((r) => {
-              const memberName =
-                [
-                  r.coop_accounts?.profiles?.first_name,
-                  r.coop_accounts?.profiles?.last_name,
-                ]
-                  .filter(Boolean)
-                  .join(" ") || "Unnamed Member";
-
-              const initial = (
-                r.coop_accounts?.profiles?.first_name?.[0] || "M"
-              ).toUpperCase();
-
+              const { memberName, initial, accountName } = getMemberDetails(r);
               const isChecked = selectedIds.includes(r.id);
 
               return (
@@ -470,7 +490,7 @@ export default function AdminContributionsPage() {
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 15 }}>{memberName}</div>
                         <div style={{ fontSize: 12, color: "var(--text-sub)" }}>
-                          {r.coop_accounts?.account_name ?? "No Account"}
+                          {accountName}
                         </div>
                       </div>
                     </div>
