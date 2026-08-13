@@ -27,7 +27,7 @@ export default function AdminSendNotification() {
       const { data, error } = await supabase
         .from("profiles")
         .select("id, email, first_name, last_name, role")
-        .neq("role", "admin"); // Exclude admins from receiving standard member notifications
+        .neq("role", "admin");
 
       if (error) {
         console.error("Error fetching profiles:", error.message);
@@ -55,7 +55,6 @@ export default function AdminSendNotification() {
     setLoading(true);
 
     try {
-      // 1. Insert global notification record
       const { data: notif, error: notifErr } = await supabase
         .from("notifications")
         .insert({ title, message, type, target_type: targetType })
@@ -64,16 +63,13 @@ export default function AdminSendNotification() {
 
       if (notifErr || !notif) throw notifErr;
 
-      // 2. Determine target user list
       let recipientIds: string[] = [];
-
       if (targetType === "all") {
         recipientIds = profiles.map((p) => p.id);
       } else {
         recipientIds = selectedUserIds;
       }
 
-      // 3. Insert user_notifications receipt records
       if (recipientIds.length > 0) {
         const userNotifs = recipientIds.map((userId) => ({
           notification_id: notif.id,
@@ -88,11 +84,7 @@ export default function AdminSendNotification() {
         if (userNotifErr) throw userNotifErr;
       }
 
-      // 4. Dispatch Web Push via server route (never call OneSignal's REST API
-      // directly from the browser — it's blocked by CORS and it would expose
-      // your REST API key to anyone reading the client bundle)
       let pushWarning: string | null = null;
-
       try {
         const pushRes = await fetch("/api/send-notification", {
           method: "POST",
@@ -103,11 +95,11 @@ export default function AdminSendNotification() {
         if (!pushRes.ok) {
           const errData = await pushRes.json().catch(() => null);
           console.error("Push dispatch failed:", errData);
-          pushWarning = "Notification saved, but push failed to send. Check console for details.";
+          pushWarning = "Notification saved, but push failed to send.";
         }
       } catch (pushErr) {
         console.error("OneSignal push error:", pushErr);
-        pushWarning = "Notification saved, but push failed to send. Check console for details.";
+        pushWarning = "Notification saved, but push failed to send.";
       }
 
       alert(pushWarning ?? "Notification dispatched successfully!");
@@ -124,27 +116,32 @@ export default function AdminSendNotification() {
   }
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto", padding: 24, color: "#fff" }}>
-      <h1 style={{ fontSize: 22, fontWeight: "bold", marginBottom: 16 }}>
-        Send Notification
-      </h1>
+    <div style={{ maxWidth: 640, margin: "0 auto", padding: "32px 20px", color: "#f8fafc", fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ marginBottom: 24, borderBottom: "1px solid #1e293b", paddingBottom: 16 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.025em", marginBottom: 4 }}>
+          Send Notification
+        </h1>
+        <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>
+          Broadcast alerts or announcements directly to member accounts.
+        </p>
+      </div>
 
-      <form onSubmit={handleSend} style={{ display: "grid", gap: 16 }}>
+      <form onSubmit={handleSend} style={{ display: "grid", gap: 20 }}>
         <div>
-          <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#cbd5e1" }}>
             Target Audience
           </label>
           <select
             value={targetType}
-            onChange={(e) =>
-              setTargetType(e.target.value as "all" | "selected")
-            }
+            onChange={(e) => setTargetType(e.target.value as "all" | "selected")}
             style={{
               width: "100%",
-              padding: 10,
-              background: "#1e293b",
+              padding: "10px 12px",
+              background: "#0f172a",
               color: "#fff",
-              borderRadius: 6,
+              border: "1px solid #334155",
+              borderRadius: 8,
+              fontSize: 14,
             }}
           >
             <option value="all">All Members ({profiles.length})</option>
@@ -155,13 +152,19 @@ export default function AdminSendNotification() {
         {targetType === "selected" && (
           <div
             style={{
-              maxHeight: 180,
+              maxHeight: 200,
               overflowY: "auto",
               border: "1px solid #334155",
-              padding: 10,
-              borderRadius: 6,
+              padding: 12,
+              borderRadius: 8,
+              background: "#0f172a",
+              display: "grid",
+              gap: 8,
             }}
           >
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontWeight: 600 }}>
+              Select Recipients ({selectedUserIds.length} selected)
+            </div>
             {profiles.map((p) => {
               const displayName =
                 p.first_name || p.last_name
@@ -175,15 +178,18 @@ export default function AdminSendNotification() {
                     display: "flex",
                     gap: 10,
                     alignItems: "center",
-                    marginBottom: 6,
+                    cursor: "pointer",
+                    fontSize: 13,
+                    color: "#e2e8f0",
                   }}
                 >
                   <input
                     type="checkbox"
                     checked={selectedUserIds.includes(p.id)}
                     onChange={() => handleSelectUser(p.id)}
+                    style={{ accentColor: "#6366f1", width: 16, height: 16 }}
                   />
-                  <span style={{ fontSize: 13 }}>{displayName}</span>
+                  <span>{displayName} <span style={{ color: "#64748b" }}>({p.email})</span></span>
                 </label>
               );
             })}
@@ -191,39 +197,69 @@ export default function AdminSendNotification() {
         )}
 
         <div>
-          <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#cbd5e1" }}>
+            Notification Type
+          </label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              background: "#0f172a",
+              color: "#fff",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              fontSize: 14,
+            }}
+          >
+            <option value="info">Info / General</option>
+            <option value="warning">Warning / Alert</option>
+            <option value="update">System Update</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#cbd5e1" }}>
             Title
           </label>
           <input
             type="text"
             required
+            placeholder="e.g., Scheduled Maintenance Update"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             style={{
               width: "100%",
-              padding: 10,
-              background: "#1e293b",
+              padding: "10px 12px",
+              background: "#0f172a",
               color: "#fff",
-              borderRadius: 6,
+              border: "1px solid #334155",
+              borderRadius: 8,
+              fontSize: 14,
             }}
           />
         </div>
 
         <div>
-          <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
-            Message
+          <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "#cbd5e1" }}>
+            Message Content
           </label>
           <textarea
             required
             rows={4}
+            placeholder="Type your notification message here..."
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             style={{
               width: "100%",
-              padding: 10,
-              background: "#1e293b",
+              padding: "10px 12px",
+              background: "#0f172a",
               color: "#fff",
-              borderRadius: 6,
+              border: "1px solid #334155",
+              borderRadius: 8,
+              fontSize: 14,
+              resize: "vertical",
             }}
           />
         </div>
@@ -234,16 +270,19 @@ export default function AdminSendNotification() {
             loading || (targetType === "selected" && selectedUserIds.length === 0)
           }
           style={{
-            padding: 12,
-            background: "#6366f1",
+            padding: "12px 20px",
+            background: loading || (targetType === "selected" && selectedUserIds.length === 0) ? "#334155" : "#6366f1",
             color: "#fff",
-            fontWeight: "bold",
-            borderRadius: 6,
+            fontWeight: 600,
+            borderRadius: 8,
             border: "none",
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
+            fontSize: 14,
+            boxShadow: "0 2px 10px rgba(99, 102, 241, 0.3)",
+            transition: "background 0.2s",
           }}
         >
-          {loading ? "Dispatching..." : "Send Notification"}
+          {loading ? "Dispatching Broadcast..." : "Send Notification"}
         </button>
       </form>
     </div>
