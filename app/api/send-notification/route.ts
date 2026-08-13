@@ -1,37 +1,43 @@
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-  const { title, message, targetType, recipientIds } = await request.json();
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
 
-  // Validate selected recipients
-  if (targetType === "selected" && (!recipientIds || recipientIds.length === 0)) {
+  if (!appId || !restApiKey) {
+    console.error("Missing OneSignal env vars:", {
+      hasAppId: !!appId,
+      hasRestApiKey: !!restApiKey,
+    });
     return NextResponse.json(
-      { error: "No recipient IDs provided for targeted notification." },
-      { status: 400 }
+      { error: "Server is missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY env vars." },
+      { status: 500 }
     );
   }
+
+  const { title, message, targetType, recipientIds } = await request.json();
 
   const body =
     targetType === "selected"
       ? {
-          app_id: process.env.ONESIGNAL_APP_ID,
+          app_id: appId,
           headings: { en: title },
           contents: { en: message },
           include_aliases: { external_id: recipientIds },
           target_channel: "push",
         }
       : {
-          app_id: process.env.ONESIGNAL_APP_ID,
+          app_id: appId,
           headings: { en: title },
           contents: { en: message },
-          included_segments: ["All"], // Changed from "Total Subscriptions" to OneSignal's default "All" segment
+          included_segments: ["Total Subscriptions"],
         };
 
   const res = await fetch("https://onesignal.com/api/v1/notifications", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Basic ${process.env.ONESIGNAL_REST_API_KEY}`,
+      Authorization: `Basic ${restApiKey}`,
     },
     body: JSON.stringify(body),
   });
@@ -39,7 +45,7 @@ export async function POST(request: Request) {
   const data = await res.json();
 
   if (!res.ok) {
-    console.error("OneSignal error response:", data);
+    console.error("OneSignal error:", data);
     return NextResponse.json({ error: data }, { status: res.status });
   }
 

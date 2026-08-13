@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 
 interface NotificationItem {
@@ -112,6 +113,29 @@ export default function NotificationsPage() {
 
   return (
     <div style={{ width: "100%", maxWidth: "100%", margin: "0 auto", padding: "12px 10px", color: "#f8fafc", fontFamily: "system-ui, sans-serif", boxSizing: "border-box", overflowX: "hidden" }}>
+      
+      {/* Navigation / Back to Dashboard Bar */}
+      <div style={{ marginBottom: 12 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "#818cf8",
+            fontSize: 12,
+            fontWeight: 500,
+            textDecoration: "none",
+            background: "#1e293b66",
+            padding: "6px 10px",
+            borderRadius: 6,
+            border: "1px solid #1e293b",
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
+      </div>
+
       {/* Header Section */}
       <div
         style={{
