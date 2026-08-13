@@ -13,18 +13,21 @@ export default function OneSignalInit({
   useEffect(() => {
     if (initialized.current) return;
 
-    initialized.current = true;
-
     const initOneSignal = async () => {
       try {
+        const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+
+        if (!appId) {
+          console.error("NEXT_PUBLIC_ONESIGNAL_APP_ID is missing");
+          return;
+        }
+
         await OneSignal.init({
-          appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID || "",
+          appId,
           allowLocalhostAsSecureOrigin: true,
-          serviceWorkerPath: "sw.js",
-          serviceWorkerParam: {
-            scope: "/",
-          },
         });
+
+        initialized.current = true;
 
         console.log("OneSignal initialized");
 
@@ -50,7 +53,6 @@ export default function OneSignalInit({
 
         if (userId) {
           await OneSignal.login(userId);
-
           console.log("OneSignal login complete:", userId);
         }
       } catch (error) {
