@@ -9,13 +9,14 @@ export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
 
   // Shared state
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Signup-only state
   const [inviteCode, setInviteCode] = useState("");
@@ -146,6 +147,26 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSuccessMsg(null);
+
+    // ---- Forgot Password Flow ----
+    if (mode === "forgot") {
+      setLoading(true);
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email,
+        {
+          redirectTo: `${window.location.origin}/reset-password`,
+        }
+      );
+
+      setLoading(false);
+      if (resetError) {
+        setError(resetError.message);
+      } else {
+        setSuccessMsg("Password reset link sent! Please check your email inbox.");
+      }
+      return;
+    }
 
     let signatureFileToUpload: File | null = null;
 
@@ -335,68 +356,78 @@ export default function LoginPage() {
             HMUK PORTAL
           </span>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: "4px 0" }}>
-            {mode === "signin" ? "Welcome Back" : "Create an Account"}
+            {mode === "signin"
+              ? "Welcome Back"
+              : mode === "signup"
+              ? "Create an Account"
+              : "Reset Your Password"}
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
             {mode === "signin"
               ? "Sign in to access your member dashboard."
-              : "Complete your profile information to join."}
+              : mode === "signup"
+              ? "Complete your profile information to join."
+              : "Enter your email address to receive a password reset link."}
           </p>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 4,
-            padding: 4,
-            background: "var(--bg-card-hover)",
-            borderRadius: 10,
-            marginBottom: 20,
-            border: "1px solid var(--border-color)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signin");
-              setError(null);
-            }}
+        {mode !== "forgot" ? (
+          <div
             style={{
-              padding: "8px 0",
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 7,
-              border: "none",
-              cursor: "pointer",
-              background: mode === "signin" ? "var(--bg-card)" : "transparent",
-              color: mode === "signin" ? "var(--text-main)" : "var(--text-sub)",
-              boxShadow: mode === "signin" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 4,
+              padding: 4,
+              background: "var(--bg-card-hover)",
+              borderRadius: 10,
+              marginBottom: 20,
+              border: "1px solid var(--border-color)",
             }}
           >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signup");
-              setError(null);
-            }}
-            style={{
-              padding: "8px 0",
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 7,
-              border: "none",
-              cursor: "pointer",
-              background: mode === "signup" ? "var(--bg-card)" : "transparent",
-              color: mode === "signup" ? "var(--text-main)" : "var(--text-sub)",
-              boxShadow: mode === "signup" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-            }}
-          >
-            Sign Up
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("signin");
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              style={{
+                padding: "8px 0",
+                fontSize: 13,
+                fontWeight: 600,
+                borderRadius: 7,
+                border: "none",
+                cursor: "pointer",
+                background: mode === "signin" ? "var(--bg-card)" : "transparent",
+                color: mode === "signin" ? "var(--text-main)" : "var(--text-sub)",
+                boxShadow: mode === "signin" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("signup");
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              style={{
+                padding: "8px 0",
+                fontSize: 13,
+                fontWeight: 600,
+                borderRadius: 7,
+                border: "none",
+                cursor: "pointer",
+                background: mode === "signup" ? "var(--bg-card)" : "transparent",
+                color: mode === "signup" ? "var(--text-main)" : "var(--text-sub)",
+                boxShadow: mode === "signup" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              Sign Up
+            </button>
+          </div>
+        ) : null}
 
         {error && (
           <div
@@ -411,6 +442,22 @@ export default function LoginPage() {
             }}
           >
             {error}
+          </div>
+        )}
+
+        {successMsg && (
+          <div
+            style={{
+              background: "rgba(34, 197, 94, 0.1)",
+              border: "1px solid rgba(34, 197, 94, 0.3)",
+              color: "#16a34a",
+              padding: "10px 14px",
+              borderRadius: 8,
+              fontSize: 13,
+              marginBottom: 16,
+            }}
+          >
+            {successMsg}
           </div>
         )}
 
@@ -493,24 +540,56 @@ export default function LoginPage() {
             />
           </div>
 
-          <div>
-            <label
-              htmlFor="password"
-              style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              style={inputStyle}
-            />
-          </div>
+          {mode !== "forgot" && (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 4,
+                }}
+              >
+                <label
+                  htmlFor="password"
+                  style={{ fontSize: 12, fontWeight: 600 }}
+                >
+                  Password
+                </label>
+                {mode === "signin" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("forgot");
+                      setError(null);
+                      setSuccessMsg(null);
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#4f46e5",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    Forgot Password?
+                  </button>
+                )}
+              </div>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                style={inputStyle}
+              />
+            </div>
+          )}
 
           {mode === "signup" && (
             <>
@@ -651,8 +730,33 @@ export default function LoginPage() {
               ? "Processing..."
               : mode === "signin"
               ? "Sign In"
-              : "Create Account"}
+              : mode === "signup"
+              ? "Create Account"
+              : "Send Reset Link"}
           </button>
+
+          {mode === "forgot" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("signin");
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-sub)",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                textAlign: "center",
+                marginTop: 4,
+              }}
+            >
+              ← Back to Sign In
+            </button>
+          )}
         </form>
       </div>
     </div>
