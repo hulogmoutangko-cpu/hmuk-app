@@ -12,7 +12,7 @@ interface NotificationItem {
     title: string;
     message: string;
     type: string;
-  };
+  } | null;
 }
 
 export default function NotificationsPage() {
@@ -26,9 +26,14 @@ export default function NotificationsPage() {
 
   async function fetchNotifications() {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from("user_notifications")
@@ -47,7 +52,17 @@ export default function NotificationsPage() {
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      setItems(data as unknown as NotificationItem[]);
+      // Safely map and parse Supabase response to resolve TypeScript errors
+      const formattedItems: NotificationItem[] = data.map((item: any) => ({
+        id: item.id,
+        is_read: item.is_read,
+        created_at: item.created_at,
+        notifications: Array.isArray(item.notifications)
+          ? item.notifications[0] ?? null
+          : item.notifications ?? null,
+      }));
+
+      setItems(formattedItems);
     }
     setLoading(false);
   }
@@ -65,11 +80,56 @@ export default function NotificationsPage() {
     }
   }
 
+  async function markAllAsRead() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("user_notifications")
+      .update({ is_read: true })
+      .eq("user_id", user.id)
+      .eq("is_read", false);
+
+    if (!error) {
+      setItems((prev) => prev.map((item) => ({ ...item, is_read: true })));
+    }
+  }
+
+  const hasUnread = items.some((item) => !item.is_read);
+
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: 24, color: "#fff" }}>
-      <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 20 }}>
-        Notifications Center
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 20,
+        }}
+      >
+        <h1 style={{ fontSize: 24, fontWeight: "bold" }}>Notifications Center</h1>
+
+        {hasUnread && (
+          <button
+            onClick={markAllAsRead}
+            style={{
+              background: "transparent",
+              color: "#818cf8",
+              border: "1px solid #334155",
+              borderRadius: 6,
+              padding: "6px 12px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            Mark all as read
+          </button>
+        )}
+      </div>
 
       {loading ? (
         <p style={{ color: "#94a3b8" }}>Loading notifications...</p>
@@ -88,16 +148,22 @@ export default function NotificationsPage() {
                 borderLeft: item.is_read ? "1px solid #334155" : "4px solid #6366f1",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 6,
+                }}
+              >
                 <h3 style={{ fontWeight: "bold", fontSize: 16 }}>
-                  {item.notifications.title}
+                  {item.notifications?.title ?? "Notification"}
                 </h3>
                 <span style={{ fontSize: 12, color: "#94a3b8" }}>
                   {new Date(item.created_at).toLocaleDateString()}
                 </span>
               </div>
               <p style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 10 }}>
-                {item.notifications.message}
+                {item.notifications?.message ?? ""}
               </p>
               {!item.is_read && (
                 <button
@@ -109,6 +175,7 @@ export default function NotificationsPage() {
                     cursor: "pointer",
                     fontSize: 12,
                     fontWeight: 600,
+                    padding: 0,
                   }}
                 >
                   Mark as Read

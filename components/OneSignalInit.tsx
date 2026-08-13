@@ -1,24 +1,27 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import OneSignal from "react-onesignal";
 
 export default function OneSignalInit({ userId }: { userId?: string }) {
+  const initialized = useRef(false);
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || initialized.current) return;
+    initialized.current = true;
 
     OneSignal.init({
       appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID || "",
-      allowLocalhostAsSecureOrigin: true, // For local dev testing
+      allowLocalhostAsSecureOrigin: true,
     }).then(() => {
-      // Prompt user to enable push notifications
       OneSignal.Slidedown.promptPush();
-
-      // Associate the user's Supabase User ID with OneSignal for targeted push
-      if (userId) {
-        OneSignal.login(userId);
-      }
     });
+  }, []);
+
+  useEffect(() => {
+    if (userId) {
+      OneSignal.login(userId);
+    }
   }, [userId]);
 
   return null;
