@@ -42,7 +42,7 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
     { label: "Payments", href: "/admin/loan-payments", icon: Receipt },
     { label: "Members", href: "/admin/members", icon: Users },
     { label: "Database", href: "/admin/database", icon: Database },
-    { label: "Terms", href: "/admin/seettings/terms", icon: FileText },
+    { label: "Terms", href: "/admin/settings/terms", icon: FileText },
     { label: "Settings", href: "/admin/settings", icon: Settings },
   ];
 
