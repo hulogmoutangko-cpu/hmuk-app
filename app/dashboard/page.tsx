@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import SignOutButton from "../sign-out-button";
 import ReferralShareCard from "@/components/ReferralShareCard";
 import OneSignalInit from "@/components/OneSignalInit";
-import PushDebugPanel from "@/components/PushDebugPanel";
+import ThemeToggle from "@/app/theme-toggle"; // Added ThemeToggle import
 import {
   Wallet,
   TrendingUp,
@@ -197,6 +197,12 @@ export default async function DashboardPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            
+            {/* Dark/Light Mode Toggle */}
+            <div style={{ transform: "scale(0.9)" }}>
+              <ThemeToggle />
+            </div>
+
             {/* Notifications Bell Icon Button */}
             <Link
               href="/notifications"
@@ -244,9 +250,6 @@ export default async function DashboardPage() {
             </div>
           </div>
         </div>
-
-        {/* TEMPORARY: Push notification debug panel — remove once push is confirmed working */}
-        
 
         {/* Member Profile Hero Card */}
         <div

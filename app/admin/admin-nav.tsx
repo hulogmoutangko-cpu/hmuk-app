@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -19,6 +19,7 @@ import {
   X,
   UserCheck,
   BellCheck,
+  ChevronDown,
 } from 'lucide-react';
 
 interface AdminNavProps {
@@ -28,123 +29,81 @@ interface AdminNavProps {
 
 export default function AdminNav({ email, firstName }: AdminNavProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
 
-  // Close mobile navigation drawer whenever the route changes
+  // Close mobile nav or dropdown on route change
   useEffect(() => {
     setIsOpen(false);
+    setIsMoreOpen(false);
   }, [pathname]);
 
-  const navLinks = [
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setIsMoreOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Primary links visible directly on the desktop bar
+  const primaryLinks = [
     { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { label: "Invites", href: "/admin/invites", icon: Ticket },
     { label: "Contributions", href: "/admin/contributions", icon: PiggyBank },
     { label: "Loans", href: "/admin/loans", icon: Banknote },
     { label: "Payments", href: "/admin/loan-payments", icon: Receipt },
     { label: "Members", href: "/admin/members", icon: Users },
-    { label: "Database", href: "/admin/database", icon: Database },
-    { label: "Terms", href: "/admin/settings/terms", icon: FileText },
-    { label: "Settings", href: "/admin/settings", icon: Settings },
-    { label: "Notification", href: "/admin/notifications", icon: BellCheck },
   ];
 
+  // Secondary/Settings links tucked away into a modern "More" sub-menu dropdown
+  const secondaryLinks = [
+    { label: "Database", href: "/admin/database", icon: Database },
+    { label: "Notification", href: "/admin/notifications", icon: BellCheck },
+    { label: "Terms", href: "/admin/settings/terms", icon: FileText },
+    { label: "Settings", href: "/admin/settings", icon: Settings },
+  ];
+
+  // Combined for mobile layout drawer usage
+  const allLinks = [...primaryLinks, ...secondaryLinks];
+  const isSecondaryActive = secondaryLinks.some((link) => link.href === pathname);
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-zinc-200 bg-white/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/80">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        
-        {/* Brand Logo & Title */}
-        <Link 
-          href="/admin" 
-          className="flex items-center gap-2.5 transition-opacity hover:opacity-80 focus:outline-none"
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <Image
-              src="/icons/logo.png"
-              alt="HMUK Logo"
-              width={22}
-              height={22}
-              className="object-contain"
-              priority
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 hidden sm:inline-block">
-              HMUK
-            </span>
-            <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-500/30">
-              Admin
-            </span>
-          </div>
-        </Link>
-
-        {/* Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-1 overflow-x-auto py-1 no-scrollbar">
-          {navLinks.map((link) => {
-            const Icon = link.icon;
-            const isActive = pathname === link.href;
-
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`group flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150 ${
-                  isActive
-                    ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
-                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-950 dark:hover:text-zinc-100'
-                }`}
-              >
-                <Icon className={`h-4 w-4 transition-transform group-hover:scale-110 ${isActive ? 'text-white dark:text-zinc-900' : 'text-zinc-500 dark:text-zinc-400'}`} />
-                <span className="whitespace-nowrap">{link.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Header Action Elements */}
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:block">
-            <ThemeToggle />
-          </div>
-
-          {/* User Greeting (Desktop) */}
-          <div className="hidden md:flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 py-1.5 px-3 text-xs font-medium text-zinc-700 dark:text-zinc-300 shadow-2xs">
-            <UserCheck className="h-3.5 w-3.5 text-indigo-500" />
-            <span className="max-w-[140px] truncate">{firstName ? `Hi, ${firstName}` : email}</span>
-          </div>
-
-          {/* Mobile Menu Toggle Button */}
-          <button
-            type="button"
-            className="flex lg:hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:outline-none"
-            onClick={() => setIsOpen(!isOpen)}
-            aria-label="Toggle navigation menu"
-          >
-            {isOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile / Bento Dropdown Drawer */}
-      {isOpen && (
-        <div className="absolute top-16 left-0 w-full border-b border-zinc-200 bg-white/95 backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/95 shadow-xl lg:hidden animate-in slide-in-from-top-2 duration-200">
-          <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-900 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400 border border-indigo-200/50">
-                ADMIN
-              </span>
-              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate max-w-[200px]">
-                {firstName ? `Hi, ${firstName}` : email}
-              </p>
+    <>
+      <header className="app-header">
+        <div className="header-container" style={{ maxWidth: '1200px' }}>
+          
+          {/* Brand Logo & Title */}
+          <Link href="/admin" className="brand" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: 'var(--bg-card-hover)',
+              border: '1px solid var(--border-color)'
+            }}>
+              <Image
+                src="/icons/logo.png"
+                alt="HMUK Logo"
+                width={18}
+                height={18}
+                style={{ objectFit: 'contain' }}
+                priority
+              />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="sm:hidden">
-                <ThemeToggle />
-              </div>
-            </div>
-          </div>
+            <span className="badge admin" style={{ fontSize: '9.5px', padding: '2px 6px' }}>ADMIN</span>
+          </Link>
 
-          <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-3">
-            {navLinks.map((link) => {
+          {/* Desktop Navigation Links */}
+          <nav className="desktop-nav" style={{ gap: '2px', position: 'relative' }}>
+            {primaryLinks.map((link) => {
               const Icon = link.icon;
               const isActive = pathname === link.href;
 
@@ -152,21 +111,140 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex flex-col items-center gap-2 rounded-xl p-3 text-center text-xs font-medium transition-all ${
-                    isActive
-                      ? 'bg-zinc-900 text-white shadow-md dark:bg-zinc-100 dark:text-zinc-900'
-                      : 'bg-zinc-50 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 border border-zinc-100 dark:border-zinc-800/60'
-                  }`}
-                  onClick={() => setIsOpen(false)}
+                  className={`nav-link ${isActive ? 'active' : ''}`}
+                  style={{ fontSize: '13px' }}
                 >
-                  <Icon className={`h-5 w-5 ${isActive ? 'text-white dark:text-zinc-900' : 'text-zinc-500 dark:text-zinc-400'}`} />
-                  <span className="truncate w-full">{link.label}</span>
+                  <Icon size={15} style={{ opacity: isActive ? 1 : 0.7 }} />
+                  <span>{link.label}</span>
                 </Link>
               );
             })}
+
+            {/* Modern "More" Sub-menu Dropdown Trigger */}
+            <div className="relative" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsMoreOpen(!isMoreOpen)}
+                className={`nav-link ${isSecondaryActive ? 'active' : ''}`}
+                style={{
+                  background: isMoreOpen ? 'var(--bg-card-hover)' : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '13px'
+                }}
+              >
+                <span>More</span>
+                <ChevronDown size={14} style={{ transform: isMoreOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' }} />
+              </button>
+
+              {/* Dropdown Menu Container */}
+              {isMoreOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  width: '180px',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.2)',
+                  padding: '6px',
+                  zIndex: 100,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px'
+                }}>
+                  {secondaryLinks.map((link) => {
+                    const Icon = link.icon;
+                    const isActive = pathname === link.href;
+
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className={`nav-link ${isActive ? 'active' : ''}`}
+                        style={{ width: '100%', justifyContent: 'flex-start', fontSize: '12.5px' }}
+                      >
+                        <Icon size={15} style={{ opacity: isActive ? 1 : 0.7 }} />
+                        <span>{link.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </nav>
+
+          {/* Header Action Elements */}
+          <div className="header-actions">
+            <div className="desktop-theme-toggle">
+              <ThemeToggle />
+            </div>
+
+            {/* User Greeting (Desktop) */}
+            <div className="user-greeting" style={{
+              background: 'var(--bg-card-hover)',
+              border: '1px solid var(--border-color)',
+              padding: '5px 10px',
+              borderRadius: '8px',
+              fontSize: '11.5px'
+            }}>
+              <UserCheck size={13} style={{ color: 'var(--primary)' }} />
+              <span>{firstName ? `Hi, ${firstName}` : email}</span>
+            </div>
+
+            {/* Mobile Menu Toggle Button */}
+            <button
+              type="button"
+              className="menu-toggle"
+              onClick={() => setIsOpen(!isOpen)}
+              aria-label="Toggle navigation menu"
+            >
+              {isOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
           </div>
         </div>
-      )}
-    </header>
+
+        {/* Mobile Drawer */}
+        {isOpen && (
+          <div className="mobile-drawer">
+            <div className="drawer-header">
+              <div className="drawer-user-info">
+                <span className="badge admin">ADMIN PORTAL</span>
+                <p className="user-email">{firstName ? `Hi, ${firstName}` : email}</p>
+              </div>
+              <div className="mobile-theme-toggle">
+                <ThemeToggle />
+              </div>
+            </div>
+
+            <div className="drawer-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+              {allLinks.map((link) => {
+                const Icon = link.icon;
+                const isActive = pathname === link.href;
+
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`drawer-item ${isActive ? 'active' : ''}`}
+                    onClick={() => setIsOpen(false)}
+                    style={{
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: '8px',
+                      padding: '12px'
+                    }}
+                  >
+                    <Icon size={18} style={{ color: isActive ? '#fff' : 'var(--primary)' }} />
+                    <span style={{ fontSize: '12.5px', fontWeight: 600 }}>{link.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </header>
+    </>
   );
 }
