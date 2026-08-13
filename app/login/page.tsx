@@ -150,12 +150,18 @@ export default function LoginPage() {
     setSuccessMsg(null);
 
     // ---- Forgot Password Flow ----
+
     if (mode === "forgot") {
       setLoading(true);
+
+      // Get origin dynamically (works both on localhost and production)
+      const origin =
+        process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(
         email,
         {
-          redirectTo: `${window.location.origin}/reset-password`,
+          redirectTo: `${origin}/reset-password`,
         }
       );
 
