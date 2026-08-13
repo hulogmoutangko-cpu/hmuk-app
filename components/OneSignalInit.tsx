@@ -29,13 +29,11 @@ export default function OneSignalInit({ userId }: { userId?: string }) {
     OneSignal.init({
       appId,
       allowLocalhostAsSecureOrigin: true,
-      // Point OneSignal at our merged sw.js (which importScripts the real
-      // OneSignal worker) instead of registering its own OneSignalSDKWorker.js
-      // at the same root scope — avoids two service workers fighting for
-      // control of "/", which was silently breaking push token issuance.
-    
-      serviceWorkerParam: { scope: "/" },
-      serviceWorkerPath: "sw.js",
+      // OneSignal's worker lives in its own subfolder with its own scope,
+      // isolated from our PWA's sw.js at the root scope — two service
+      // workers can coexist fine as long as they don't share a scope.
+      serviceWorkerParam: { scope: "/onesignal/" },
+      serviceWorkerPath: "onesignal/OneSignalSDKWorker.js",
     }).then(() => {
       OneSignal.Slidedown.promptPush();
     });
