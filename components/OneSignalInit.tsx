@@ -44,6 +44,7 @@ export default function OneSignalInit({ userId }: { userId?: string }) {
       OneSignal.login(userId);
     }
   }, [userId]);
+  
 
   return null;
 }
