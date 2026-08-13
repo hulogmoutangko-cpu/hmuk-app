@@ -5,7 +5,6 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import AdminNav from "../admin-nav";
 
-// Helper type to normalize Supabase relational structures (array vs single object)
 type SingleOrArray<T> = T | T[];
 
 type SupabaseProfile = {
@@ -23,6 +22,7 @@ type Row = {
   amount: number | null;
   pay_date: string | null;
   signature_url: string | null;
+  status: "pending" | "approved" | "rejected";
   coop_accounts: SingleOrArray<SupabaseCoopAccount> | null;
 };
 
@@ -33,7 +33,6 @@ function fmt(amount: number | null | undefined) {
   });
 }
 
-// Safe helpers to extract normalized object data regardless of Supabase join structure
 function getCoopAccount(row: Row): SupabaseCoopAccount | null {
   if (!row.coop_accounts) return null;
   return Array.isArray(row.coop_accounts)
@@ -72,8 +71,15 @@ export default function AdminContributionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeSignature, setActiveSignature] = useState<string | null>(null);
 
-  // Search & Batch Selection State
+  // Tab State
+  const [activeTab, setActiveTab] = useState<"pending" | "approved">("pending");
+
+  // Search & Date Filter State
   const [searchQuery, setSearchQuery] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
+  // Batch Selection State
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   async function load() {
@@ -81,10 +87,10 @@ export default function AdminContributionsPage() {
     const { data, error } = await supabase
       .from("contributions")
       .select(
-        "id, amount, pay_date, signature_url, coop_accounts(account_name, profiles(first_name,last_name))"
+        "id, amount, pay_date, signature_url, status, coop_accounts(account_name, profiles(first_name,last_name))"
       )
-      .eq("status", "pending")
-      .order("created_at", { ascending: true });
+      .eq("status", activeTab)
+      .order("created_at", { ascending: false });
 
     if (error) setError(error.message);
     setRows((data as unknown as Row[]) ?? []);
@@ -95,25 +101,40 @@ export default function AdminContributionsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeTab]);
 
-  // Filter rows dynamically based on search input with null-safe guards
+  // Combined Filter logic (Search query + Date range)
   const filteredRows = useMemo(() => {
-    if (!searchQuery.trim()) return rows;
-    const query = searchQuery.toLowerCase();
     return rows.filter((r) => {
+      // Search filter
       const { memberName, accountName } = getMemberDetails(r);
-      const name = memberName.toLowerCase();
-      const account = accountName.toLowerCase();
-      const amount = (r.amount ?? 0).toString();
+      const query = searchQuery.toLowerCase().trim();
+      const nameMatch = memberName.toLowerCase().includes(query);
+      const accountMatch = accountName.toLowerCase().includes(query);
+      const amountMatch = (r.amount ?? 0).toString().includes(query);
+      const matchesSearch = !query || nameMatch || accountMatch || amountMatch;
 
-      return (
-        name.includes(query) ||
-        account.includes(query) ||
-        amount.includes(query)
-      );
+      // Date range filter
+      let matchesDate = true;
+      if (r.pay_date) {
+        const payDate = new Date(r.pay_date).getTime();
+        if (startDate) {
+          const start = new Date(startDate).getTime();
+          if (payDate < start) matchesDate = false;
+        }
+        if (endDate) {
+          // Set to end of the day for inclusive boundary
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          if (payDate > end.getTime()) matchesDate = false;
+        }
+      } else if (startDate || endDate) {
+        matchesDate = false;
+      }
+
+      return matchesSearch && matchesDate;
     });
-  }, [rows, searchQuery]);
+  }, [rows, searchQuery, startDate, endDate]);
 
   // Bulk Selection Handlers
   function toggleSelectAll() {
@@ -202,11 +223,54 @@ export default function AdminContributionsPage() {
             ADMINISTRATION
           </span>
           <h1 style={{ fontSize: 24, fontWeight: 800, margin: "4px 0" }}>
-            Pending Contributions
+            Member Contributions
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Approve contributions individually or in bulk to record them on members' accounts.
+            Review, approve, or reject contribution records submitted by members.
           </p>
+        </div>
+
+        {/* Tab Switcher */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            borderBottom: "1px solid var(--border-color)",
+            marginBottom: 20,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab("pending")}
+            style={{
+              padding: "10px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              background: "transparent",
+              border: "none",
+              borderBottom: activeTab === "pending" ? "2px solid var(--primary)" : "2px solid transparent",
+              color: activeTab === "pending" ? "var(--primary)" : "var(--text-sub)",
+              cursor: "pointer",
+            }}
+          >
+            Pending
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("approved")}
+            style={{
+              padding: "10px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              background: "transparent",
+              border: "none",
+              borderBottom: activeTab === "approved" ? "2px solid var(--primary)" : "2px solid transparent",
+              color: activeTab === "approved" ? "var(--primary)" : "var(--text-sub)",
+              cursor: "pointer",
+            }}
+          >
+            Approved
+          </button>
         </div>
 
         {error && (
@@ -225,40 +289,98 @@ export default function AdminContributionsPage() {
           </div>
         )}
 
-        {/* Controls Toolbar */}
-        {!loading && rows.length > 0 && (
-          <div
+        {/* Controls Toolbar: Search, Date Range, & Actions */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 16,
+            background: "var(--bg-card)",
+            border: "1px solid var(--border-color)",
+            padding: 12,
+            borderRadius: 12,
+          }}
+        >
+          {/* Search Box */}
+          <input
+            type="text"
+            placeholder="Search member, account, amount..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              marginBottom: 16,
-              background: "var(--bg-card)",
+              padding: "8px 12px",
+              borderRadius: 8,
               border: "1px solid var(--border-color)",
-              padding: 12,
-              borderRadius: 12,
+              background: "var(--bg-card-hover)",
+              color: "var(--text-main)",
+              fontSize: 13,
+              outline: "none",
+              minWidth: 200,
+              flex: "1 1 200px",
             }}
-          >
-            <input
-              type="text"
-              placeholder="Search member, account, amount..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border-color)",
-                background: "var(--bg-card-hover)",
-                color: "var(--text-main)",
-                fontSize: 13,
-                outline: "none",
-                minWidth: 240,
-                flex: "1 1 240px",
-              }}
-            />
+          />
 
+          {/* Date Filter Inputs */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>From:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-card-hover)",
+                  color: "var(--text-main)",
+                  fontSize: 13,
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>To:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-card-hover)",
+                  color: "var(--text-main)",
+                  fontSize: 13,
+                }}
+              />
+            </div>
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStartDate("");
+                  setEndDate("");
+                }}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: "1px solid var(--border-color)",
+                  background: "transparent",
+                  color: "var(--text-sub)",
+                  cursor: "pointer",
+                }}
+              >
+                Clear Dates
+              </button>
+            )}
+          </div>
+
+          {/* Batch Actions (Only visible in 'pending' tab) */}
+          {activeTab === "pending" && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               {selectedIds.length > 0 && (
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-sub)" }}>
@@ -286,18 +408,18 @@ export default function AdminContributionsPage() {
                 Reject Selected
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Loading State */}
         {loading && (
           <div style={{ padding: 32, textAlign: "center", color: "var(--text-sub)", fontSize: 14 }}>
-            Loading pending contributions...
+            Loading {activeTab} contributions...
           </div>
         )}
 
         {/* Empty State */}
-        {!loading && rows.length === 0 && (
+        {!loading && filteredRows.length === 0 && (
           <div
             style={{
               background: "var(--bg-card)",
@@ -308,34 +430,36 @@ export default function AdminContributionsPage() {
               color: "var(--text-sub)",
             }}
           >
-            No pending contributions to approve.
+            No {activeTab} contributions found matching your filters.
           </div>
         )}
 
         {/* Desktop View: Table */}
-        {!loading && rows.length > 0 && (
+        {!loading && filteredRows.length > 0 && (
           <div className="desktop-table-view">
             <div className="table-wrapper">
               <table className="table">
                 <thead>
                   <tr>
-                    <th style={{ width: 40 }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredRows.length > 0 &&
-                          selectedIds.length === filteredRows.length
-                        }
-                        onChange={toggleSelectAll}
-                        style={{ cursor: "pointer" }}
-                      />
-                    </th>
+                    {activeTab === "pending" && (
+                      <th style={{ width: 40 }}>
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredRows.length > 0 &&
+                            selectedIds.length === filteredRows.length
+                          }
+                          onChange={toggleSelectAll}
+                          style={{ cursor: "pointer" }}
+                        />
+                      </th>
+                    )}
                     <th>Member</th>
                     <th>Account</th>
                     <th>Amount</th>
                     <th>Payment Date</th>
                     <th>Signature</th>
-                    <th style={{ textAlign: "right" }}>Actions</th>
+                    {activeTab === "pending" && <th style={{ textAlign: "right" }}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -345,14 +469,16 @@ export default function AdminContributionsPage() {
 
                     return (
                       <tr key={r.id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleSelectOne(r.id)}
-                            style={{ cursor: "pointer" }}
-                          />
-                        </td>
+                        {activeTab === "pending" && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleSelectOne(r.id)}
+                              style={{ cursor: "pointer" }}
+                            />
+                          </td>
+                        )}
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <div
@@ -398,24 +524,26 @@ export default function AdminContributionsPage() {
                             <span style={{ color: "var(--text-sub)", fontSize: 12 }}>—</span>
                           )}
                         </td>
-                        <td style={{ textAlign: "right" }}>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                            <button
-                              disabled={actingId === r.id || bulkProcessing}
-                              onClick={() => act(r.id, "approved")}
-                              className="btn-approve-sm"
-                            >
-                              {actingId === r.id ? "..." : "Approve"}
-                            </button>
-                            <button
-                              disabled={actingId === r.id || bulkProcessing}
-                              onClick={() => act(r.id, "rejected")}
-                              className="btn-reject-sm"
-                            >
-                              {actingId === r.id ? "..." : "Reject"}
-                            </button>
-                          </div>
-                        </td>
+                        {activeTab === "pending" && (
+                          <td style={{ textAlign: "right" }}>
+                            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                              <button
+                                disabled={actingId === r.id || bulkProcessing}
+                                onClick={() => act(r.id, "approved")}
+                                className="btn-approve-sm"
+                              >
+                                {actingId === r.id ? "..." : "Approve"}
+                              </button>
+                              <button
+                                disabled={actingId === r.id || bulkProcessing}
+                                onClick={() => act(r.id, "rejected")}
+                                className="btn-reject-sm"
+                              >
+                                {actingId === r.id ? "..." : "Reject"}
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -426,28 +554,30 @@ export default function AdminContributionsPage() {
         )}
 
         {/* Mobile View: Cards */}
-        {!loading && rows.length > 0 && (
+        {!loading && filteredRows.length > 0 && (
           <div className="mobile-card-list">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "8px 4px",
-              }}
-            >
-              <label style={{ fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={
-                    filteredRows.length > 0 && selectedIds.length === filteredRows.length
-                  }
-                  onChange={toggleSelectAll}
-                  style={{ marginRight: 8 }}
-                />
-                Select All ({filteredRows.length})
-              </label>
-            </div>
+            {activeTab === "pending" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 4px",
+                }}
+              >
+                <label style={{ fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredRows.length > 0 && selectedIds.length === filteredRows.length
+                    }
+                    onChange={toggleSelectAll}
+                    style={{ marginRight: 8 }}
+                  />
+                  Select All ({filteredRows.length})
+                </label>
+              </div>
+            )}
 
             {filteredRows.map((r) => {
               const { memberName, initial, accountName } = getMemberDetails(r);
@@ -458,19 +588,22 @@ export default function AdminContributionsPage() {
                   key={r.id}
                   className="mobile-member-card"
                   style={{
-                    borderLeft: isChecked
-                      ? "4px solid var(--primary)"
-                      : "1px solid var(--border-color)",
+                    borderLeft:
+                      activeTab === "pending" && isChecked
+                        ? "4px solid var(--primary)"
+                        : "1px solid var(--border-color)",
                   }}
                 >
                   <div className="mobile-member-header">
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleSelectOne(r.id)}
-                        style={{ cursor: "pointer", width: 18, height: 18 }}
-                      />
+                      {activeTab === "pending" && (
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSelectOne(r.id)}
+                          style={{ cursor: "pointer", width: 18, height: 18 }}
+                        />
+                      )}
                       <div
                         style={{
                           width: 36,
@@ -529,31 +662,33 @@ export default function AdminContributionsPage() {
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 8,
-                      marginTop: 14,
-                    }}
-                  >
-                    <button
-                      disabled={actingId === r.id || bulkProcessing}
-                      onClick={() => act(r.id, "approved")}
-                      className="btn-approve-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
+                  {activeTab === "pending" && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 8,
+                        marginTop: 14,
+                      }}
                     >
-                      {actingId === r.id ? "Processing..." : "Approve"}
-                    </button>
-                    <button
-                      disabled={actingId === r.id || bulkProcessing}
-                      onClick={() => act(r.id, "rejected")}
-                      className="btn-reject-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
-                    >
-                      {actingId === r.id ? "Processing..." : "Reject"}
-                    </button>
-                  </div>
+                      <button
+                        disabled={actingId === r.id || bulkProcessing}
+                        onClick={() => act(r.id, "approved")}
+                        className="btn-approve-sm"
+                        style={{ padding: "10px 0", fontSize: 13 }}
+                      >
+                        {actingId === r.id ? "Processing..." : "Approve"}
+                      </button>
+                      <button
+                        disabled={actingId === r.id || bulkProcessing}
+                        onClick={() => act(r.id, "rejected")}
+                        className="btn-reject-sm"
+                        style={{ padding: "10px 0", fontSize: 13 }}
+                      >
+                        {actingId === r.id ? "Processing..." : "Reject"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
