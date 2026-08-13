@@ -24,7 +24,6 @@ export default function AdminSendNotification() {
 
   useEffect(() => {
     async function fetchProfiles() {
-      // 1. Fixed query: Selected existing schema columns (first_name, last_name)
       const { data, error } = await supabase
         .from("profiles")
         .select("id, email, first_name, last_name, role")
@@ -89,28 +88,29 @@ export default function AdminSendNotification() {
         if (userNotifErr) throw userNotifErr;
       }
 
-      // 4. Dispatch Web Push via OneSignal REST API
+      // 4. Dispatch Web Push via server route (never call OneSignal's REST API
+      // directly from the browser — it's blocked by CORS and it would expose
+      // your REST API key to anyone reading the client bundle)
+      let pushWarning: string | null = null;
+
       try {
-        await fetch("https://onesignal.com/api/v1/notifications", {
+        const pushRes = await fetch("/api/send-notification", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Basic ${process.env.NEXT_PUBLIC_ONESIGNAL_REST_KEY || ""}`,
-          },
-          body: JSON.stringify({
-            app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
-            headings: { en: title },
-            contents: { en: message },
-            ...(targetType === "selected"
-              ? { include_aliases: { external_id: recipientIds }, target_channel: "push" }
-              : { included_segments: ["Total Subscriptions"] }),
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, message, targetType, recipientIds }),
         });
+
+        if (!pushRes.ok) {
+          const errData = await pushRes.json().catch(() => null);
+          console.error("Push dispatch failed:", errData);
+          pushWarning = "Notification saved, but push failed to send. Check console for details.";
+        }
       } catch (pushErr) {
         console.error("OneSignal push error:", pushErr);
+        pushWarning = "Notification saved, but push failed to send. Check console for details.";
       }
 
-      alert("Notification dispatched successfully!");
+      alert(pushWarning ?? "Notification dispatched successfully!");
       setTitle("");
       setMessage("");
       setSelectedUserIds([]);

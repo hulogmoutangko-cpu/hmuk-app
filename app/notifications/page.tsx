@@ -19,6 +19,7 @@ export default function NotificationsPage() {
   const supabase = createClient();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
 
   useEffect(() => {
     fetchNotifications();
@@ -52,7 +53,6 @@ export default function NotificationsPage() {
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      // Safely map and parse Supabase response to resolve TypeScript errors
       const formattedItems: NotificationItem[] = data.map((item: any) => ({
         id: item.id,
         is_read: item.is_read,
@@ -77,6 +77,9 @@ export default function NotificationsPage() {
       setItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, is_read: true } : item))
       );
+      if (selectedNotification?.id === id) {
+        setSelectedNotification((prev) => (prev ? { ...prev, is_read: true } : null));
+      }
     }
   }
 
@@ -140,19 +143,21 @@ export default function NotificationsPage() {
           {items.map((item) => (
             <div
               key={item.id}
+              onClick={() => setSelectedNotification(item)}
               style={{
                 padding: 16,
                 borderRadius: 10,
                 border: "1px solid #334155",
                 background: item.is_read ? "#1e293b" : "#0f172a",
                 borderLeft: item.is_read ? "1px solid #334155" : "4px solid #6366f1",
+                cursor: "pointer",
               }}
             >
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  marginBottom: 6,
+                  marginBottom: 4,
                 }}
               >
                 <h3 style={{ fontWeight: "bold", fontSize: 16 }}>
@@ -162,27 +167,129 @@ export default function NotificationsPage() {
                   {new Date(item.created_at).toLocaleDateString()}
                 </span>
               </div>
-              <p style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 10 }}>
-                {item.notifications?.message ?? ""}
+              <p
+                style={{
+                  color: "#cbd5e1",
+                  fontSize: 14,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {item.notifications?.message ?? "Click to view details"}
               </p>
-              {!item.is_read && (
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal Popup for Notification Details */}
+      {selectedNotification && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0, 0, 0, 0.7)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: "#1e293b",
+              borderRadius: 12,
+              padding: 24,
+              width: "100%",
+              maxWidth: 500,
+              border: "1px solid #334155",
+              boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <h2 style={{ fontSize: 18, fontWeight: "bold", color: "#fff" }}>
+                {selectedNotification.notifications?.title ?? "Notification Details"}
+              </h2>
+              <button
+                onClick={() => setSelectedNotification(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: 18,
+                  cursor: "pointer",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>
+              Received on: {new Date(selectedNotification.created_at).toLocaleString()}
+            </p>
+
+            <div
+              style={{
+                background: "#0f172a",
+                padding: 14,
+                borderRadius: 8,
+                color: "#e2e8f0",
+                fontSize: 14,
+                marginBottom: 20,
+                lineHeight: 1.5,
+                maxHeight: 250,
+                overflowY: "auto",
+              }}
+            >
+              {selectedNotification.notifications?.message ?? "No content available for this notification."}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              {!selectedNotification.is_read && (
                 <button
-                  onClick={() => markAsRead(item.id)}
+                  onClick={() => markAsRead(selectedNotification.id)}
                   style={{
-                    background: "transparent",
-                    color: "#818cf8",
+                    background: "#6366f1",
+                    color: "#fff",
                     border: "none",
+                    borderRadius: 6,
+                    padding: "8px 16px",
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: 600,
-                    padding: 0,
                   }}
                 >
                   Mark as Read
                 </button>
               )}
+              <button
+                onClick={() => setSelectedNotification(null)}
+                style={{
+                  background: "#334155",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                Close
+              </button>
             </div>
-          ))}
+          </div>
         </div>
       )}
     </div>
