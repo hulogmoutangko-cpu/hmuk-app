@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   const { title, message, targetType, recipientIds } = await request.json();
 
+  // Validate selected recipients
+  if (targetType === "selected" && (!recipientIds || recipientIds.length === 0)) {
+    return NextResponse.json(
+      { error: "No recipient IDs provided for targeted notification." },
+      { status: 400 }
+    );
+  }
+
   const body =
     targetType === "selected"
       ? {
@@ -16,7 +24,7 @@ export async function POST(request: Request) {
           app_id: process.env.ONESIGNAL_APP_ID,
           headings: { en: title },
           contents: { en: message },
-          included_segments: ["Total Subscriptions"],
+          included_segments: ["All"], // Changed from "Total Subscriptions" to OneSignal's default "All" segment
         };
 
   const res = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -31,7 +39,7 @@ export async function POST(request: Request) {
   const data = await res.json();
 
   if (!res.ok) {
-    console.error("OneSignal error:", data);
+    console.error("OneSignal error response:", data);
     return NextResponse.json({ error: data }, { status: res.status });
   }
 
