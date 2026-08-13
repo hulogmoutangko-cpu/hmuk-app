@@ -94,7 +94,7 @@ export default function AdminSendNotification() {
 
         if (!pushRes.ok) {
           const errData = await pushRes.json().catch(() => null);
-          console.error("Push dispatch failed:", errData);
+          console.error("Push dispatch failed:", JSON.stringify(errData, null, 2));
           pushWarning = "Notification saved, but push failed to send.";
         }
       } catch (pushErr) {

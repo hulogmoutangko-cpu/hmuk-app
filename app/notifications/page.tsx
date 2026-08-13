@@ -111,24 +111,24 @@ export default function NotificationsPage() {
   const unreadCount = items.filter((item) => !item.is_read).length;
 
   return (
-    <div style={{ width: "100%", maxWidth: 600, margin: "0 auto", padding: "16px 12px", color: "#f8fafc", fontFamily: "system-ui, sans-serif", boxSizing: "border-box" }}>
+    <div style={{ width: "100%", maxWidth: "100%", margin: "0 auto", padding: "12px 10px", color: "#f8fafc", fontFamily: "system-ui, sans-serif", boxSizing: "border-box", overflowX: "hidden" }}>
       {/* Header Section */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 12,
-          marginBottom: 20,
+          gap: 10,
+          marginBottom: 16,
           borderBottom: "1px solid #1e293b",
-          paddingBottom: 14,
+          paddingBottom: 12,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.025em", marginBottom: 2 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.025em", marginBottom: 2 }}>
               Notifications
             </h1>
-            <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>
+            <p style={{ fontSize: 12, color: "#94a3b8", margin: 0 }}>
               {unreadCount > 0 ? `You have ${unreadCount} unread message${unreadCount > 1 ? 's' : ''}` : "You're all caught up!"}
             </p>
           </div>
@@ -141,9 +141,9 @@ export default function NotificationsPage() {
                 color: "#a5b4fc",
                 border: "1px solid #334155",
                 borderRadius: 8,
-                padding: "6px 12px",
+                padding: "6px 10px",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 500,
                 whiteSpace: "nowrap",
               }}
@@ -157,23 +157,23 @@ export default function NotificationsPage() {
       {/* Content Section */}
       {loading ? (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#64748b" }}>
-          <p style={{ fontSize: 14 }}>Loading notifications...</p>
+          <p style={{ fontSize: 13 }}>Loading notifications...</p>
         </div>
       ) : items.length === 0 ? (
         <div
           style={{
             textAlign: "center",
-            padding: "40px 16px",
+            padding: "32px 16px",
             background: "#0f172a",
-            borderRadius: 14,
+            borderRadius: 12,
             border: "1px dashed #334155",
           }}
         >
-          <p style={{ color: "#94a3b8", fontSize: 14, marginBottom: 4 }}>No notifications found</p>
-          <p style={{ color: "#64748b", fontSize: 12 }}>We'll notify you when something important arrives.</p>
+          <p style={{ color: "#94a3b8", fontSize: 13, marginBottom: 4 }}>No notifications found</p>
+          <p style={{ color: "#64748b", fontSize: 11 }}>We'll notify you when something important arrives.</p>
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 8 }}>
           {items.map((item) => {
             const notifType = item.notifications?.type ?? "info";
             return (
@@ -181,27 +181,29 @@ export default function NotificationsPage() {
                 key={item.id}
                 onClick={() => handleOpenNotification(item)}
                 style={{
-                  padding: "14px 16px",
-                  borderRadius: 12,
+                  padding: "12px",
+                  borderRadius: 10,
                   border: "1px solid",
                   borderColor: item.is_read ? "#1e293b" : "#3730a3",
                   background: item.is_read ? "#0f172a88" : "#0f172a",
                   cursor: "pointer",
                   display: "flex",
-                  gap: 12,
+                  gap: 10,
                   alignItems: "flex-start",
+                  width: "100%",
+                  boxSizing: "border-box",
                 }}
               >
                 {/* Unread Indicator Dot */}
-                <div style={{ paddingTop: 5 }}>
+                <div style={{ paddingTop: 4 }}>
                   <span
                     style={{
                       display: "block",
-                      width: 8,
-                      height: 8,
+                      width: 7,
+                      height: 7,
                       borderRadius: "50%",
                       background: item.is_read ? "transparent" : "#6366f1",
-                      boxShadow: item.is_read ? "none" : "0 0 6px #6366f1",
+                      boxShadow: item.is_read ? "none" : "0 0 5px #6366f1",
                     }}
                   />
                 </div>
@@ -211,15 +213,15 @@ export default function NotificationsPage() {
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      alignItems: "center",
+                      alignItems: "flex-start",
                       marginBottom: 4,
-                      gap: 8,
+                      gap: 6,
                     }}
                   >
-                    <h3 style={{ fontWeight: 600, fontSize: 14, color: "#f8fafc", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <h3 style={{ fontWeight: 600, fontSize: 13, color: "#f8fafc", margin: 0, wordBreak: "break-word", lineHeight: 1.3 }}>
                       {item.notifications?.title ?? "Notification"}
                     </h3>
-                    <span style={{ fontSize: 11, color: "#64748b", whiteSpace: "nowrap", flexShrink: 0 }}>
+                    <span style={{ fontSize: 10, color: "#64748b", whiteSpace: "nowrap", flexShrink: 0, paddingTop: 1 }}>
                       {new Date(item.created_at).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",
@@ -230,10 +232,10 @@ export default function NotificationsPage() {
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                     <span
                       style={{
-                        fontSize: 9,
+                        fontSize: 8,
                         textTransform: "uppercase",
-                        padding: "1px 5px",
-                        borderRadius: 4,
+                        padding: "1px 4px",
+                        borderRadius: 3,
                         background: "#1e293b",
                         color: "#94a3b8",
                         fontWeight: 600,
@@ -247,12 +249,15 @@ export default function NotificationsPage() {
                   <p
                     style={{
                       color: "#94a3b8",
-                      fontSize: 13,
+                      fontSize: 12,
                       margin: 0,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
                       lineHeight: 1.3,
+                      wordBreak: "break-word",
                     }}
                   >
                     {item.notifications?.message ?? "Tap to view details..."}
@@ -277,21 +282,22 @@ export default function NotificationsPage() {
             backdropFilter: "blur(4px)",
             display: "flex",
             justifyContent: "center",
-            alignItems: "flex-end", // Bottom aligned for mobile ergonomics
+            alignItems: "flex-end",
             zIndex: 1000,
+            margin: 0,
           }}
           onClick={() => setSelectedNotification(null)}
         >
           <div
             style={{
               background: "#0f172a",
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
+              borderTopLeftRadius: 16,
+              borderTopRightRadius: 16,
               border: "1px solid #334155",
               borderBottom: "none",
-              padding: "20px 16px 28px 16px",
+              padding: "16px 14px 24px 14px",
               width: "100%",
-              maxWidth: 600,
+              maxWidth: "100%",
               maxHeight: "85vh",
               overflowY: "auto",
               boxSizing: "border-box",
@@ -300,34 +306,35 @@ export default function NotificationsPage() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Grab handle indicator */}
-            <div style={{ width: 36, height: 4, background: "#334155", borderRadius: 2, margin: "0 auto 16px auto" }} />
+            <div style={{ width: 32, height: 4, background: "#334155", borderRadius: 2, margin: "0 auto 12px auto" }} />
 
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "flex-start",
-                marginBottom: 10,
+                marginBottom: 8,
+                gap: 8,
               }}
             >
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 9,
                     textTransform: "uppercase",
-                    padding: "2px 6px",
-                    borderRadius: 4,
+                    padding: "2px 5px",
+                    borderRadius: 3,
                     background: "#1e293b",
                     color: "#818cf8",
                     fontWeight: 600,
                     letterSpacing: "0.05em",
                     display: "inline-block",
-                    marginBottom: 6,
+                    marginBottom: 4,
                   }}
                 >
                   {selectedNotification.notifications?.type ?? "Notification"}
                 </span>
-                <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f8fafc", margin: 0, lineHeight: 1.3 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc", margin: 0, lineHeight: 1.3, wordBreak: "break-word" }}>
                   {selectedNotification.notifications?.title ?? "Notification Details"}
                 </h2>
               </div>
@@ -337,10 +344,10 @@ export default function NotificationsPage() {
                   background: "#1e293b",
                   border: "none",
                   borderRadius: "50%",
-                  width: 30,
-                  height: 30,
+                  width: 28,
+                  height: 28,
                   color: "#94a3b8",
-                  fontSize: 14,
+                  fontSize: 13,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -352,7 +359,7 @@ export default function NotificationsPage() {
               </button>
             </div>
 
-            <p style={{ fontSize: 11, color: "#64748b", marginBottom: 14 }}>
+            <p style={{ fontSize: 10, color: "#64748b", marginBottom: 12 }}>
               {new Date(selectedNotification.created_at).toLocaleString(undefined, {
                 dateStyle: "medium",
                 timeStyle: "short",
@@ -363,15 +370,16 @@ export default function NotificationsPage() {
               style={{
                 background: "#1e293b55",
                 border: "1px solid #1e293b",
-                padding: 14,
-                borderRadius: 10,
+                padding: 12,
+                borderRadius: 8,
                 color: "#cbd5e1",
-                fontSize: 13,
-                marginBottom: 20,
-                lineHeight: 1.5,
-                maxHeight: "40vh",
+                fontSize: 12,
+                marginBottom: 16,
+                lineHeight: 1.4,
+                maxHeight: "35vh",
                 overflowY: "auto",
                 whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
               }}
             >
               {selectedNotification.notifications?.message ?? "No text details provided."}
@@ -384,10 +392,10 @@ export default function NotificationsPage() {
                 background: "#1e293b",
                 color: "#cbd5e1",
                 border: "1px solid #334155",
-                borderRadius: 10,
-                padding: "12px",
+                borderRadius: 8,
+                padding: "10px",
                 cursor: "pointer",
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: 600,
                 textAlign: "center",
               }}
