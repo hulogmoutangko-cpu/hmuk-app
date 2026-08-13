@@ -17,9 +17,9 @@ export default function PayContributionPage() {
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
   
-  // Track both the intended due date and the actual date paid
+  // Due date is selectable, but payDate is strictly locked to today
   const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payDate] = useState(new Date().toISOString().slice(0, 10));
   
   const [loading, setLoading] = useState(false);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
@@ -398,7 +398,7 @@ export default function PayContributionPage() {
                 />
               </div>
 
-              {/* Pay Date */}
+              {/* Pay Date (Locked) */}
               <div>
                 <label
                   htmlFor="payDate"
@@ -417,17 +417,20 @@ export default function PayContributionPage() {
                   type="date"
                   required
                   value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
+                  readOnly
+                  disabled
                   style={{
                     width: "100%",
                     padding: "10px 12px",
                     borderRadius: 8,
                     border: "1px solid var(--border-color)",
-                    background: "var(--bg-card-hover)",
-                    color: "var(--text-main)",
+                    background: "var(--bg-main)", // Slightly darker/different background to indicate it's locked
+                    color: "var(--text-sub)",
                     fontSize: 14,
                     outline: "none",
-                    boxSizing: "border-box"
+                    boxSizing: "border-box",
+                    cursor: "not-allowed",
+                    opacity: 0.8
                   }}
                 />
               </div>
