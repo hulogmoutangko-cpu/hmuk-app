@@ -6,7 +6,9 @@ import { createClient } from "@/utils/supabase/client";
 interface Profile {
   id: string;
   email: string;
-  full_name?: string;
+  first_name?: string;
+  last_name?: string;
+  role?: string;
 }
 
 export default function AdminSendNotification() {
@@ -21,13 +23,24 @@ export default function AdminSendNotification() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Fetch profiles for selective sending
-    supabase
-      .from("profiles")
-      .select("id, email, full_name")
-      .then(({ data }) => {
-        if (data) setProfiles(data);
-      });
+    async function fetchProfiles() {
+      // 1. Fixed query: Selected existing schema columns (first_name, last_name)
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, email, first_name, last_name, role")
+        .neq("role", "admin"); // Exclude admins from receiving standard member notifications
+
+      if (error) {
+        console.error("Error fetching profiles:", error.message);
+        return;
+      }
+
+      if (data) {
+        setProfiles(data);
+      }
+    }
+
+    fetchProfiles();
   }, [supabase]);
 
   function handleSelectUser(userId: string) {
@@ -61,7 +74,7 @@ export default function AdminSendNotification() {
         recipientIds = selectedUserIds;
       }
 
-      // 3. Insert notification receipt records for each targeted user in Supabase
+      // 3. Insert user_notifications receipt records
       if (recipientIds.length > 0) {
         const userNotifs = recipientIds.map((userId) => ({
           notification_id: notif.id,
@@ -76,7 +89,7 @@ export default function AdminSendNotification() {
         if (userNotifErr) throw userNotifErr;
       }
 
-      // 4. Dispatch System Web Push Notification via OneSignal
+      // 4. Dispatch Web Push via OneSignal REST API
       try {
         await fetch("https://onesignal.com/api/v1/notifications", {
           method: "POST",
@@ -88,14 +101,13 @@ export default function AdminSendNotification() {
             app_id: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID,
             headings: { en: title },
             contents: { en: message },
-            // Target selected users via External ID (linked via OneSignal.login) or broadcast to all
             ...(targetType === "selected"
               ? { include_aliases: { external_id: recipientIds }, target_channel: "push" }
               : { included_segments: ["Total Subscriptions"] }),
           }),
         });
       } catch (pushErr) {
-        console.error("In-app saved, but Web Push dispatch failed:", pushErr);
+        console.error("OneSignal push error:", pushErr);
       }
 
       alert("Notification dispatched successfully!");
@@ -150,24 +162,31 @@ export default function AdminSendNotification() {
               borderRadius: 6,
             }}
           >
-            {profiles.map((p) => (
-              <label
-                key={p.id}
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "center",
-                  marginBottom: 6,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedUserIds.includes(p.id)}
-                  onChange={() => handleSelectUser(p.id)}
-                />
-                <span style={{ fontSize: 13 }}>{p.full_name || p.email}</span>
-              </label>
-            ))}
+            {profiles.map((p) => {
+              const displayName =
+                p.first_name || p.last_name
+                  ? `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()
+                  : p.email;
+
+              return (
+                <label
+                  key={p.id}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedUserIds.includes(p.id)}
+                    onChange={() => handleSelectUser(p.id)}
+                  />
+                  <span style={{ fontSize: 13 }}>{displayName}</span>
+                </label>
+              );
+            })}
           </div>
         )}
 
