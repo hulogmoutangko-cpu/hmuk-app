@@ -67,6 +67,7 @@ body {
 
 .desktop-nav {
   display: flex;
+  align-items: center;
   gap: 4px;
 }
 
@@ -78,11 +79,20 @@ body {
   font-weight: 500;
   border-radius: 8px;
   transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.nav-link:hover {
+.nav-link:hover,
+.nav-link.active {
   color: var(--text-main);
   background: var(--bg-card-hover);
+}
+
+.nav-link.active {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .header-actions {
@@ -91,10 +101,19 @@ body {
   gap: 8px;
 }
 
+.user-greeting {
+  font-size: 12px;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Theme Toggle Button Fix */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 6px 12px !important;
   height: 36px;
@@ -116,7 +135,7 @@ body {
   width: 36px;
   height: 36px;
   padding: 0;
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   font-size: 16px;
@@ -127,11 +146,36 @@ body {
   cursor: pointer;
 }
 
-/* Mobile Bento Drawer */
+/* Mobile Bento Drawer & Grid Enhancements */
 .mobile-drawer {
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.drawer-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drawer-user-info .user-email {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
 }
 
 .drawer-grid {
@@ -149,7 +193,18 @@ body {
   text-decoration: none;
   font-size: 13px;
   font-weight: 600;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+
+.drawer-item:hover,
+.drawer-item.active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
 }
 
 /* Layout Container */
@@ -264,20 +319,6 @@ body {
   align-items: center;
 }
 
-/* Responsive Switches */
-@media (max-width: 768px) {
-  .desktop-nav {
-    display: none;
-  }
-
-  .desktop-table-view {
-    display: none;
-  }
-
-  .mobile-card-list {
-    display: flex;
-  }
-}
 /* Hero Section */
 .dashboard-hero {
   display: flex;
@@ -357,21 +398,6 @@ body {
   border-color: rgba(239, 68, 68, 0.3);
 }
 
-/* Responsive tweaks for mobile */
-@media (max-width: 600px) {
-  .grid-cards {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .dashboard-hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .dashboard-hero > div:last-child {
-    width: 100% !important;
-  }
-}
 /* Custom Action Buttons */
 .btn-approve-sm {
   background: #10b981;
@@ -428,4 +454,42 @@ body {
 
 .btn-secondary-sm:hover {
   border-color: var(--border-focus);
+}
+
+/* Responsive Switches */
+@media (max-width: 900px) {
+  .desktop-nav,
+  .user-greeting,
+  .desktop-theme-toggle {
+    display: none;
+  }
+
+  .menu-toggle {
+    display: flex;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktop-table-view {
+    display: none;
+  }
+
+  .mobile-card-list {
+    display: flex;
+  }
+}
+
+@media (max-width: 600px) {
+  .grid-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .dashboard-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-hero > div:last-child {
+    width: 100% !important;
+  }
 }

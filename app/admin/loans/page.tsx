@@ -51,10 +51,21 @@ export default function AdminLoansPage() {
     setError(null);
 
     // Map tab values to DB status matching
-    let statusFilter = [status];
-    if (status === "pending") statusFilter = ["pending", "Pending"];
-    if (status === "active") statusFilter = ["active", "approved", "disbursed", "Active"];
-    if (status === "completed") statusFilter = ["completed", "settled", "Completed"];
+    let statusFilter: string[];
+
+    switch (status) {
+      case "pending":
+        statusFilter = ["pending", "Pending"];
+        break;
+      case "active":
+        statusFilter = ["active", "approved", "disbursed", "Active"];
+        break;
+      case "completed":
+        statusFilter = ["completed", "settled", "Completed"];
+        break;
+      default:
+        statusFilter = [status];
+    }
 
     const { data, error } = await supabase
       .from("loans")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -13,6 +13,8 @@ import {
   Receipt,
   Users,
   Settings,
+  Database,
+  FileText,
   Menu,
   X,
   UserCheck,
@@ -27,6 +29,11 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
 
+  // Close mobile navigation drawer whenever the route changes
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
+
   const navLinks = [
     { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { label: "Invites", href: "/admin/invites", icon: Ticket },
@@ -34,6 +41,8 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
     { label: "Loans", href: "/admin/loans", icon: Banknote },
     { label: "Payments", href: "/admin/loan-payments", icon: Receipt },
     { label: "Members", href: "/admin/members", icon: Users },
+    { label: "Database", href: "/admin/database", icon: Database },
+    { label: "Terms", href: "/admin/terms", icon: FileText },
     { label: "Settings", href: "/admin/settings", icon: Settings },
   ];
 
@@ -46,16 +55,13 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
             <Image
               src="/icons/logo.png"
               alt="HMUK Logo"
-              width={32}
-              height={32}
+              width={28}
+              height={28}
               style={{ objectFit: 'contain' }}
               priority
             />
             <div className="brand-text">
-              <span className="brand-name"></span>
-              <span className="brand-badge" style={{ fontSize: '10px', color: 'var(--primary-color, #2563eb)', fontWeight: 700 }}>
-                ADMIN Portal
-              </span>
+              <span className="brand-badge">ADMIN Portal</span>
             </div>
           </Link>
 
@@ -70,12 +76,6 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
                   key={link.href}
                   href={link.href}
                   className={`nav-link ${isActive ? 'active' : ''}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontWeight: isActive ? 600 : 500,
-                  }}
                 >
                   <Icon size={16} />
                   <span>{link.label}</span>
@@ -84,11 +84,14 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
             })}
           </nav>
 
+          {/* Header Action Elements */}
           <div className="header-actions">
-            <ThemeToggle />
+            <div className="desktop-theme-toggle">
+              <ThemeToggle />
+            </div>
 
             {/* User Greeting (Desktop) */}
-            <div className="user-greeting" style={{ fontSize: '12px', color: 'var(--text-sub, #666)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div className="user-greeting">
               <UserCheck size={14} />
               <span>{firstName ? `Hi, ${firstName}` : email}</span>
             </div>
@@ -100,7 +103,7 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
               onClick={() => setIsOpen(!isOpen)}
               aria-label="Toggle navigation menu"
             >
-              {isOpen ? <X size={20} /> : <Menu size={20} />}
+              {isOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
         </div>
@@ -108,10 +111,16 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
         {/* Mobile / Bento Dropdown Drawer */}
         {isOpen && (
           <div className="mobile-drawer">
-            <div className="drawer-user-info">
-              <span className="badge admin">ADMIN</span>
-              <p className="user-email">{firstName ? `Hi, ${firstName}` : email}</p>
+            <div className="drawer-header">
+              <div className="drawer-user-info">
+                <span className="badge admin">ADMIN</span>
+                <p className="user-email">{firstName ? `Hi, ${firstName}` : email}</p>
+              </div>
+              <div className="mobile-theme-toggle">
+                <ThemeToggle />
+              </div>
             </div>
+
             <div className="drawer-grid">
               {navLinks.map((link) => {
                 const Icon = link.icon;
@@ -123,13 +132,8 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
                     href={link.href}
                     className={`drawer-item ${isActive ? 'active' : ''}`}
                     onClick={() => setIsOpen(false)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                    }}
                   >
-                    <Icon size={18} />
+                    <Icon size={16} />
                     <span>{link.label}</span>
                   </Link>
                 );
