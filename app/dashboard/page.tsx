@@ -4,6 +4,7 @@ import Image from "next/image";
 import { createClient } from "@/utils/supabase/server";
 import SignOutButton from "../sign-out-button";
 import ReferralShareCard from "@/components/ReferralShareCard";
+import OneSignalInit from "@/components/OneSignalInit";
 import {
   Wallet,
   TrendingUp,
@@ -15,8 +16,7 @@ import {
   DollarSign,
   Building,
   Home,
-  User,
-  LogOut,
+  Bell,
 } from "lucide-react";
 
 function fmt(amount: number) {
@@ -27,7 +27,7 @@ function fmt(amount: number) {
 }
 
 export default async function DashboardPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -47,6 +47,13 @@ export default async function DashboardPage() {
   if (profile?.role === "admin") {
     redirect("/admin");
   }
+
+  // Fetch Unread Notification Count
+  const { count: unreadCount } = await supabase
+    .from("user_notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .eq("is_read", false);
 
   const { data: accounts } = await supabase
     .from("coop_accounts")
@@ -156,6 +163,9 @@ export default async function DashboardPage() {
         background: "var(--bg-main)",
       }}
     >
+      {/* Initialize OneSignal Client SDK */}
+      <OneSignalInit userId={user.id} />
+
       <div
         style={{
           maxWidth: 600,
@@ -185,8 +195,52 @@ export default async function DashboardPage() {
             </span>
           </div>
 
-          <div style={{ transform: "scale(0.9)" }}>
-            <SignOutButton />
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Notifications Bell Icon Button */}
+            <Link
+              href="/notifications"
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 38,
+                height: 38,
+                borderRadius: "50%",
+                background: "var(--bg-card-hover)",
+                border: "1px solid var(--border-color)",
+                color: "var(--text-main)",
+                textDecoration: "none",
+              }}
+            >
+              <Bell size={18} />
+              {(unreadCount ?? 0) > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: -2,
+                    right: -2,
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    borderRadius: "50%",
+                    width: 18,
+                    height: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "2px solid var(--bg-main)",
+                  }}
+                >
+                  {unreadCount! > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </Link>
+
+            <div style={{ transform: "scale(0.9)" }}>
+              <SignOutButton />
+            </div>
           </div>
         </div>
 

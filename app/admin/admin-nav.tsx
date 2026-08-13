@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   UserCheck,
+  BellCheck,
 } from 'lucide-react';
 
 interface AdminNavProps {
@@ -44,6 +45,7 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
     { label: "Database", href: "/admin/database", icon: Database },
     { label: "Terms", href: "/admin/settings/terms", icon: FileText },
     { label: "Settings", href: "/admin/settings", icon: Settings },
+    { label: "Notification", href: "/admin/notifications", icon: BellCheck },
   ];
 
   return (
