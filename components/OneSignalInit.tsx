@@ -25,6 +25,14 @@ export default function OneSignalInit({
         await OneSignal.init({
           appId,
           allowLocalhostAsSecureOrigin: true,
+
+          // Use the root service worker
+          serviceWorkerPath: "sw.js",
+
+          // Root scope so OneSignal works across the whole app
+          serviceWorkerParam: {
+            scope: "/",
+          },
         });
 
         initialized.current = true;
@@ -53,6 +61,7 @@ export default function OneSignalInit({
 
         if (userId) {
           await OneSignal.login(userId);
+
           console.log("OneSignal login complete:", userId);
         }
       } catch (error) {
