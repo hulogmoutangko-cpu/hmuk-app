@@ -16,9 +16,11 @@ export default function PayContributionPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
-  const [payDate, setPayDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  
+  // Track both the intended due date and the actual date paid
+  const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  
   const [loading, setLoading] = useState(false);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,6 @@ export default function PayContributionPage() {
 
       const fetchedAccounts = data ?? [];
       setAccounts(fetchedAccounts);
-      // Select all accounts by default
       setSelectedAccountIds(fetchedAccounts.map((a) => a.id));
       setLoadingAccounts(false);
     }
@@ -64,6 +65,30 @@ export default function PayContributionPage() {
     }
   }
 
+  // --- Penalty Calculation Logic ---
+  const parsedAmount = Number(amount) || 0;
+  let isLate = false;
+
+  if (dueDate && payDate) {
+    const tDate = new Date(dueDate);
+    const aDate = new Date(payDate);
+    tDate.setHours(0, 0, 0, 0);
+    aDate.setHours(0, 0, 0, 0);
+
+    // Add 4 days grace period to the due date
+    const graceEnd = new Date(tDate);
+    graceEnd.setDate(graceEnd.getDate() + 4);
+
+    // If the actual payment date is strictly greater than the grace period end
+    if (aDate > graceEnd) {
+      isLate = true;
+    }
+  }
+
+  const penaltyPerAccount = isLate ? parsedAmount * 0.10 : 0; // 10% Penalty
+  const totalPerAccount = parsedAmount + penaltyPerAccount;
+  const calculatedTotal = totalPerAccount * selectedAccountIds.length;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -72,7 +97,6 @@ export default function PayContributionPage() {
       setError("Please select at least one account to pay contributions.");
       return;
     }
-    const parsedAmount = Number(amount);
     if (!parsedAmount || parsedAmount <= 0) {
       setError("Please enter a valid contribution amount.");
       return;
@@ -114,8 +138,10 @@ export default function PayContributionPage() {
       const recordsToInsert = selectedAccountIds.map((accId) => ({
         account_id: accId,
         amount: parsedAmount,
+        penalty_amount: penaltyPerAccount, // Save the calculated penalty
+        due_date: dueDate,                 // Save intended due date
+        pay_date: payDate,                 // Save actual pay date
         signature_url: publicUrl,
-        pay_date: payDate,
       }));
 
       // 3. Insert records
@@ -132,9 +158,6 @@ export default function PayContributionPage() {
       setLoading(false);
     }
   }
-
-  const calculatedTotal =
-    (Number(amount) || 0) * selectedAccountIds.length;
 
   return (
     <div
@@ -314,7 +337,7 @@ export default function PayContributionPage() {
                   marginBottom: 6,
                 }}
               >
-                Amount Per Account (₱)
+                Base Amount Per Account (₱)
               </label>
               <input
                 id="amount"
@@ -334,70 +357,136 @@ export default function PayContributionPage() {
                   color: "var(--text-main)",
                   fontSize: 14,
                   outline: "none",
+                  boxSizing: "border-box"
                 }}
               />
             </div>
+
+            {/* Date Selection Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {/* Due Date */}
+              <div>
+                <label
+                  htmlFor="dueDate"
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-sub)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Contribution Due Date
+                </label>
+                <input
+                  id="dueDate"
+                  type="date"
+                  required
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-card-hover)",
+                    color: "var(--text-main)",
+                    fontSize: 14,
+                    outline: "none",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              {/* Pay Date */}
+              <div>
+                <label
+                  htmlFor="payDate"
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-sub)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Actual Payment Date
+                </label>
+                <input
+                  id="payDate"
+                  type="date"
+                  required
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-card-hover)",
+                    color: "var(--text-main)",
+                    fontSize: 14,
+                    outline: "none",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Penalty Warning Card */}
+            {isLate && parsedAmount > 0 && (
+              <div
+                style={{
+                  background: "rgba(245, 158, 11, 0.1)",
+                  border: "1px dashed rgba(245, 158, 11, 0.4)",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: "#d97706",
+                }}
+              >
+                <strong>Late Payment Detected:</strong> The payment date exceeds the 4-day grace period. A 10% penalty (₱{penaltyPerAccount.toFixed(2)}) has been applied per account.
+              </div>
+            )}
 
             {/* Total Calculation Card */}
             {selectedAccountIds.length > 0 && Number(amount) > 0 && (
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
+                  flexDirection: "column",
+                  gap: 8,
                   background: "rgba(16, 185, 129, 0.08)",
                   border: "1px dashed rgba(16, 185, 129, 0.3)",
-                  padding: "10px 14px",
+                  padding: "12px 14px",
                   borderRadius: 8,
                   fontSize: 13,
                 }}
               >
-                <span style={{ color: "var(--text-sub)" }}>
-                  Total Payment ({selectedAccountIds.length} account
-                  {selectedAccountIds.length > 1 ? "s" : ""}):
-                </span>
-                <strong style={{ fontSize: 15, color: "#10b981" }}>
-                  ₱
-                  {calculatedTotal.toLocaleString("en-PH", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </strong>
+                <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-sub)" }}>
+                  <span>Base Total:</span>
+                  <span>₱{(parsedAmount * selectedAccountIds.length).toFixed(2)}</span>
+                </div>
+                {isLate && (
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706" }}>
+                    <span>Penalty Total (10%):</span>
+                    <span>+ ₱{(penaltyPerAccount * selectedAccountIds.length).toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, paddingTop: 8, borderTop: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                  <span style={{ color: "var(--text-sub)", fontWeight: 600 }}>
+                    Final Payment ({selectedAccountIds.length} account{selectedAccountIds.length > 1 ? "s" : ""}):
+                  </span>
+                  <strong style={{ fontSize: 15, color: "#10b981" }}>
+                    ₱
+                    {calculatedTotal.toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </strong>
+                </div>
               </div>
             )}
-
-            {/* Pay Date */}
-            <div>
-              <label
-                htmlFor="payDate"
-                style={{
-                  display: "block",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                  marginBottom: 6,
-                }}
-              >
-                Payment Date
-              </label>
-              <input
-                id="payDate"
-                type="date"
-                required
-                value={payDate}
-                onChange={(e) => setPayDate(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border-color)",
-                  background: "var(--bg-card-hover)",
-                  color: "var(--text-main)",
-                  fontSize: 14,
-                  outline: "none",
-                }}
-              />
-            </div>
 
             {/* Signature Area */}
             <div>
@@ -436,6 +525,7 @@ export default function PayContributionPage() {
                 fontWeight: 600,
                 marginTop: 4,
                 height: 44,
+                cursor: loading ? "not-allowed" : "pointer"
               }}
             >
               {loading
