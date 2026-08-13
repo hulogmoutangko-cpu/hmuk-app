@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
@@ -11,10 +11,40 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSessionReady, setIsSessionReady] = useState(false);
+
+  useEffect(() => {
+    // 1. Listen for Supabase session establishment from the reset URL token
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === "PASSWORD_RECOVERY" || session) {
+          setIsSessionReady(true);
+          setError(null);
+        }
+      }
+    );
+
+    // 2. Check if a session is already active
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setIsSessionReady(true);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (!isSessionReady) {
+      setError("Auth session missing! Please click the link in your email again.");
+      return;
+    }
+
     setLoading(true);
 
     const { error: updateError } = await supabase.auth.updateUser({
@@ -26,6 +56,7 @@ export default function ResetPasswordPage() {
     if (updateError) {
       setError(updateError.message);
     } else {
+      // Password updated successfully -> redirect to dashboard or login
       router.push("/dashboard");
       router.refresh();
     }
@@ -39,23 +70,24 @@ export default function ResetPasswordPage() {
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        background: "var(--bg-main)",
+        background: "var(--bg-main, #0f172a)",
       }}
     >
       <div
         style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-color)",
+          background: "var(--bg-card, #1e293b)",
+          border: "1px solid var(--border-color, #334155)",
           borderRadius: 16,
           padding: 28,
           maxWidth: 400,
           width: "100%",
+          color: "#ffffff",
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>
           Set New Password
         </h1>
-        <p style={{ fontSize: 13, color: "var(--text-sub)", marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>
           Enter your new password below.
         </p>
 
@@ -95,9 +127,9 @@ export default function ResetPasswordPage() {
                 width: "100%",
                 padding: "10px 12px",
                 borderRadius: 8,
-                border: "1px solid var(--border-color)",
-                background: "var(--bg-card-hover)",
-                color: "var(--text-main)",
+                border: "1px solid var(--border-color, #334155)",
+                background: "var(--bg-card-hover, #0f172a)",
+                color: "#ffffff",
                 fontSize: 14,
                 outline: "none",
               }}
@@ -106,9 +138,18 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading}
-            className="btn-approve-sm"
-            style={{ width: "100%", padding: "12px 0", fontSize: 14, fontWeight: 600 }}
+            disabled={loading || !isSessionReady}
+            style={{
+              width: "100%",
+              padding: "12px 0",
+              fontSize: 14,
+              fontWeight: 600,
+              borderRadius: 8,
+              background: isSessionReady ? "#10b981" : "#475569",
+              color: "#ffffff",
+              border: "none",
+              cursor: isSessionReady ? "pointer" : "not-allowed",
+            }}
           >
             {loading ? "Updating..." : "Update Password"}
           </button>

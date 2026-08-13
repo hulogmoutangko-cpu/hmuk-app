@@ -149,8 +149,9 @@ export default function LoginPage() {
     setError(null);
     setSuccessMsg(null);
 
-    // ---- Forgot Password Flow ----
+   
 
+   // ---- Forgot Password Flow ----
     if (mode === "forgot") {
       setLoading(true);
 
@@ -161,7 +162,8 @@ export default function LoginPage() {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(
         email,
         {
-          redirectTo: `${origin}/reset-password`,
+          // Route through /auth/callback so the server exchanges the code for a session
+          redirectTo: `${origin}/auth/callback?next=/reset-password`,
         }
       );
 
