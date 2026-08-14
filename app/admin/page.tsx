@@ -12,6 +12,29 @@ function fmt(amount: number) {
   });
 }
 
+// Helper to count total semi-monthly periods (twice a month) between start date and now
+function getExpectedSemiMonthlyPeriods(startDateStr: string): number {
+  const start = new Date(startDateStr);
+  const now = new Date();
+  
+  if (isNaN(start.getTime())) return 1;
+
+  let periods = 0;
+  let curr = new Date(start.getFullYear(), start.getMonth(), 1);
+
+  while (curr <= now) {
+    const p1End = new Date(curr.getFullYear(), curr.getMonth(), 15);
+    if (p1End <= now && curr <= now) periods++;
+
+    const p2Start = new Date(curr.getFullYear(), curr.getMonth(), 16);
+    if (p2Start <= now) periods++;
+
+    curr.setMonth(curr.getMonth() + 1);
+  }
+
+  return Math.max(1, periods);
+}
+
 export default async function AdminPage() {
   const supabase = createClient();
   const {
@@ -41,8 +64,11 @@ export default async function AdminPage() {
     { data: activeLoans },
     { data: approvedPayments },
     { data: interestPayments },
-    { count: unpaidMembersCount },
     { data: penaltiesList },
+    { data: allProfiles },
+    { data: allAccounts },
+    { data: allContributions },
+    { data: settingsRows },
   ] = await Promise.all([
     supabase
       .from("contributions")
@@ -69,13 +95,24 @@ export default async function AdminPage() {
     supabase
       .from("loan_interest_payments")
       .select("interest_amount, pool_amount"),
-    supabase
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("has_pending_contribution", true),
-    // Fetch from your actual 'penalties' table schema
     supabase.from("penalties").select("amount"),
+    supabase.from("profiles").select("id, role"),
+    supabase.from("coop_accounts").select("id, profile_id"),
+    supabase
+      .from("contributions")
+      .select("account_id, amount, status, pay_date, created_at")
+      .in("status", ["approved", "pending"]),
+    // Fetch settings from your existing system_settings table
+    supabase.from("system_settings").select("key, value").in("key", ["coop_start_date", "monthly_contribution_amount"]),
   ]);
+
+  // Convert settings rows array into an easy object map
+  const settingsMap: Record<string, string> = {};
+  (settingsRows ?? []).forEach((row) => {
+    if (row.key && row.value) {
+      settingsMap[row.key] = row.value;
+    }
+  });
 
   // 1. Total Approved Contributions
   const totalContributions = (approvedContributions ?? []).reduce(
@@ -105,17 +142,50 @@ export default async function AdminPage() {
     return sum + remaining;
   }, 0);
 
-  // 4. Total Interest Income from loan_interest_payments
+  // 4. Total Interest Income
   const totalInterestIncome = (interestPayments ?? []).reduce(
     (sum, i) => sum + Number(i.interest_amount || 0),
     0
   );
 
-  // 5. Total Penalties from the 'penalties' table
+  // 5. Total Penalties
   const totalPenalties = (penaltiesList ?? []).reduce(
     (sum, p) => sum + Number(p.amount || 0),
     0
   );
+
+  // 6. Calculate Unpaid Members based on System Settings
+  const coopStartDate = settingsMap["coop_start_date"] || "2026-01-01";
+  const monthlyAmount = Number(settingsMap["monthly_contribution_amount"] || 1000);
+  const semiMonthlyTargetAmount = monthlyAmount / 2; // Split payment twice a month
+
+  const totalExpectedPeriods = getExpectedSemiMonthlyPeriods(coopStartDate);
+  const totalExpectedAmountPerMember = totalExpectedPeriods * semiMonthlyTargetAmount;
+
+  const accountPaidTotals: Record<string, number> = {};
+  (allContributions ?? []).forEach((c) => {
+    if (c.account_id) {
+      accountPaidTotals[c.account_id] =
+        (accountPaidTotals[c.account_id] || 0) + Number(c.amount || 0);
+    }
+  });
+
+  const profileToAccounts: Record<string, string[]> = {};
+  (allAccounts ?? []).forEach((acc) => {
+    if (!profileToAccounts[acc.profile_id]) {
+      profileToAccounts[acc.profile_id] = [];
+    }
+    profileToAccounts[acc.profile_id].push(acc.id);
+  });
+
+  const unpaidMembersCount = (allProfiles ?? []).filter((p) => {
+    if (p.role === "admin") return false;
+    const userAccs = profileToAccounts[p.id] || [];
+    if (userAccs.length === 0) return true;
+
+    const userTotalPaid = userAccs.reduce((sum, accId) => sum + (accountPaidTotals[accId] || 0), 0);
+    return userTotalPaid < totalExpectedAmountPerMember;
+  }).length;
 
   return (
     <div>
@@ -128,7 +198,7 @@ export default async function AdminPage() {
             <span className="badge admin">ADMIN DASHBOARD</span>
             <h1>Welcome back, {profile?.first_name ?? "Admin"}</h1>
             <p style={{ margin: "4px 0 0", color: "var(--text-sub)", fontSize: 13.5 }}>
-              {user.email}
+              {user.email} • Co-op Start: {coopStartDate} ({fmt(semiMonthlyTargetAmount)} / semi-monthly)
             </p>
           </div>
           <div style={{ width: 120 }}>
@@ -210,12 +280,12 @@ export default async function AdminPage() {
             <div className="value">{totalMembers ?? 0}</div>
           </div>
           <div className="stat-card">
-            <div className="label">Unpaid Member Contri</div>
+            <div className="label">Unpaid / Behind Members</div>
             <div
               className="value"
-              style={{ color: (unpaidMembersCount ?? 0) > 0 ? "#ef4444" : "inherit" }}
+              style={{ color: unpaidMembersCount > 0 ? "#ef4444" : "inherit" }}
             >
-              {unpaidMembersCount ?? 0}
+              {unpaidMembersCount}
             </div>
           </div>
         </div>
