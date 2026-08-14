@@ -39,6 +39,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   upcoming: { label: "Active / Unpaid", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
   overdue: { label: "Overdue (1+ Day Late)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
   completed: { label: "Fully paid", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" },
+  "Interest Paid": { label: "Interest Paid", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.12)" },
 };
 
 export default function PayLoanPage() {
@@ -494,7 +495,7 @@ export default function PayLoanPage() {
                 })}
               </div>
             )}
-            
+
             <div style={{ display: "grid", gap: 12, marginTop: 4 }}>
               <div>
                 <label
