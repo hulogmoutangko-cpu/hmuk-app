@@ -97,6 +97,13 @@ export default function DashboardClient({
           router.refresh();
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_notifications" },
+        () => {
+          router.refresh();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -112,7 +119,7 @@ export default function DashboardClient({
         background: "var(--bg-main)",
       }}
     >
-      <OneSignalInit userId={user.id} />
+      <OneSignalInit userId={user?.id} />
 
       <div
         style={{
@@ -206,7 +213,7 @@ export default function DashboardClient({
                     border: "2px solid var(--bg-main)",
                   }}
                 >
-                  {unreadCount > 9 ? "9+" : unreadCount}
+                  {unreadCount! > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </Link>
@@ -301,7 +308,7 @@ export default function DashboardClient({
                   fontSize: 12,
                 }}
               >
-                {user.email}
+                {user?.email}
               </p>
             </div>
           </div>
