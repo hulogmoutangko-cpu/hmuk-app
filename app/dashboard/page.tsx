@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import SignOutButton from "../sign-out-button";
 import ReferralShareCard from "@/components/ReferralShareCard";
 import OneSignalInit from "@/components/OneSignalInit";
-import ThemeToggle from "@/app/theme-toggle"; // Added ThemeToggle import
+import ThemeToggle from "@/app/theme-toggle";
 import {
   Wallet,
   TrendingUp,
@@ -117,12 +117,15 @@ export default async function DashboardPage() {
       0
     );
 
-    const accountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
+    const totalSystemPool = totalApprovedInterest + totalPenaltiesSum;
     
-    // Interest earned per individual coop account
-    interestPerAccountShare = (totalApprovedInterest + totalPenaltiesSum) / accountCount;
+    // Ensure we divide by the exact total system accounts count (e.g., 20)
+    const systemAccountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
+    
+    // Correct per-account share calculation (e.g., 2050 / 20 = 102.50)
+    interestPerAccountShare = totalSystemPool / systemAccountCount;
 
-    // Total interest earned by this user is their account count multiplied by the per-account share
+    // Total interest earned by this user is their personal account count multiplied by the per-account share
     interestEarned = interestPerAccountShare * accountIds.length;
 
     const activeLoanIds = (loans ?? []).map((l) => l.id);
@@ -187,11 +190,10 @@ export default async function DashboardPage() {
     <div
       style={{
         minHeight: "100vh",
-        paddingBottom: 80, // Space for bottom navbar
+        paddingBottom: 80,
         background: "var(--bg-main)",
       }}
     >
-      {/* Initialize OneSignal Client SDK */}
       <OneSignalInit userId={user.id} />
 
       <div
@@ -224,13 +226,10 @@ export default async function DashboardPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            
-            {/* Dark/Light Mode Toggle */}
             <div style={{ transform: "scale(0.9)" }}>
               <ThemeToggle />
             </div>
 
-            {/* Notifications Bell Icon Button */}
             <Link
               href="/notifications"
               style={{
@@ -524,7 +523,7 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* App Action Buttons (Circle Icons) */}
+        {/* Quick Actions */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
