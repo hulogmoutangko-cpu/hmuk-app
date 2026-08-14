@@ -119,13 +119,13 @@ export default async function DashboardPage() {
 
     const totalSystemPool = totalApprovedInterest + totalPenaltiesSum;
     
-    // Ensure we divide by the exact total system accounts count (e.g., 20)
+    // Ensure we divide by the exact total system accounts count
     const systemAccountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
     
-    // Correct per-account share calculation (e.g., 2050 / 20 = 102.50)
+    // Exact Interest earned per account: (Total Interest + Penalties) / Total System Accounts
     interestPerAccountShare = totalSystemPool / systemAccountCount;
 
-    // Total interest earned by this user is their personal account count multiplied by the per-account share
+    // Total interest earned by this user: Per-account share * User's specific account count
     interestEarned = interestPerAccountShare * accountIds.length;
 
     const activeLoanIds = (loans ?? []).map((l) => l.id);
