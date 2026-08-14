@@ -25,7 +25,6 @@ type DueInfo = {
   is_final_installment: boolean;
 };
 
-// Formatter updated to round up/display without decimals
 function fmt(amount: number) {
   const wholeAmount = Math.ceil(Number(amount) || 0);
   return wholeAmount.toLocaleString("en-PH", {
@@ -57,6 +56,7 @@ export default function PayLoanPage() {
 
   const [principalPortion, setPrincipalPortion] = useState("");
   const [interestPortion, setInterestPortion] = useState("");
+  const [penaltyPortion, setPenaltyPortion] = useState("");
   const [payDate, setPayDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -132,10 +132,10 @@ export default function PayLoanPage() {
     loadDue();
   }, [loanId, supabase]);
 
-  // Automatically compute and update rounded-up totals
   useEffect(() => {
     let totalPrincipal = 0;
-    let totalInterestAndPenalties = 0;
+    let totalInterest = 0;
+    let totalPenalty = 0;
 
     installments.forEach((inst) => {
       if (selectedMonths[inst.installment_number]) {
@@ -145,17 +145,18 @@ export default function PayLoanPage() {
           totalPrincipal += Number(inst.principal_due || 0);
         }
 
-        totalInterestAndPenalties += Number(inst.interest_due || 0);
+        totalInterest += Number(inst.interest_due || 0);
 
         if (inst.is_final_installment) {
-          totalInterestAndPenalties += Number(inst.extra_interest_due || 0) + Number(inst.penalty_due || 0);
+          totalInterest += Number(inst.extra_interest_due || 0);
+          totalPenalty += Number(inst.penalty_due || 0);
         }
       }
     });
 
-    // Use Math.ceil to round up to the next whole number
     setPrincipalPortion(Math.ceil(totalPrincipal).toString());
-    setInterestPortion(Math.ceil(totalInterestAndPenalties).toString());
+    setInterestPortion(Math.ceil(totalInterest).toString());
+    setPenaltyPortion(Math.ceil(totalPenalty).toString());
   }, [selectedMonths, paymentModes, installments]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -166,10 +167,13 @@ export default function PayLoanPage() {
       setError("Select a loan to pay toward.");
       return;
     }
+
     const principal = Math.ceil(Number(principalPortion || 0));
     const interest = Math.ceil(Number(interestPortion || 0));
-    if (principal <= 0 && interest <= 0) {
-      setError("Enter at least a principal or interest amount.");
+    const penalty = Math.ceil(Number(penaltyPortion || 0));
+
+    if (principal <= 0 && interest <= 0 && penalty <= 0) {
+      setError("Enter at least a principal, interest, or penalty amount.");
       return;
     }
     if (!sigRef.current || sigRef.current.isEmpty()) {
@@ -204,6 +208,7 @@ export default function PayLoanPage() {
         data: { publicUrl },
       } = supabase.storage.from("loan-signatures").getPublicUrl(path);
 
+      // 1. Insert main record into loan_payments table
       const { error: insertError } = await supabase
         .from("loan_payments")
         .insert({
@@ -217,6 +222,43 @@ export default function PayLoanPage() {
 
       if (insertError) throw insertError;
 
+      // 2. Insert records into loan_interest_payments table
+      if (interest > 0) {
+        for (const inst of installments) {
+          if (selectedMonths[inst.installment_number]) {
+            const instInterest = Math.ceil(
+              Number(inst.interest_due || 0) +
+                (inst.is_final_installment ? Number(inst.extra_interest_due || 0) : 0)
+            );
+            if (instInterest > 0) {
+              const { error: interestError } = await supabase
+                .from("loan_interest_payments")
+                .insert({
+                  loan_id: loanId,
+                  period_month: inst.due_date || payDate,
+                  interest_amount: instInterest,
+                  posted_by: user.id,
+                });
+
+              if (interestError) throw interestError;
+            }
+          }
+        }
+      }
+
+      // 3. Insert into penalties table if penalty exists
+      if (penalty > 0) {
+        const { error: penaltyError } = await supabase
+          .from("penalties")
+          .insert({
+            name: "Late Loan Penalty",
+            amount: penalty,
+            description: `Overdue penalty paid for loan ID ${loanId}`,
+          });
+
+        if (penaltyError) throw penaltyError;
+      }
+
       router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
@@ -227,7 +269,8 @@ export default function PayLoanPage() {
 
   const currentPrincipal = Math.ceil(Number(principalPortion) || 0);
   const currentInterest = Math.ceil(Number(interestPortion) || 0);
-  const totalPayment = currentPrincipal + currentInterest;
+  const currentPenalty = Math.ceil(Number(penaltyPortion) || 0);
+  const totalPayment = currentPrincipal + currentInterest + currentPenalty;
 
   return (
     <div
@@ -272,7 +315,7 @@ export default function PayLoanPage() {
             Pay Loan
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Select the month(s) you wish to pay. Amounts are automatically rounded up to whole numbers.
+            Select installment months to pay. Amounts automatically route to Principal, Interest, and Penalty ledgers.
           </p>
         </div>
 
@@ -442,7 +485,7 @@ export default function PayLoanPage() {
                             {currentMode === "full"
                               ? `Principal: ${fmt(inst.principal_due)} + Int: ${fmt(inst.interest_due)}`
                               : `Int Only: ${fmt(inst.interest_due)}`}
-                            {inst.is_final_installment && inst.penalty_due > 0 && " (+Penalties)"}
+                            {inst.is_final_installment && inst.penalty_due > 0 && ` (+ Penalty: ${fmt(inst.penalty_due)})`}
                           </span>
                         </div>
                       )}
@@ -463,7 +506,7 @@ export default function PayLoanPage() {
                     marginBottom: 6,
                   }}
                 >
-                  Total Principal Amount to Pay (₱)
+                  Principal Amount (₱)
                 </label>
                 <input
                   type="number"
@@ -493,13 +536,43 @@ export default function PayLoanPage() {
                     marginBottom: 6,
                   }}
                 >
-                  Total Interest & Penalty Amount to Pay (₱)
+                  Interest Amount (₱)
                 </label>
                 <input
                   type="number"
                   step="1"
                   value={interestPortion}
                   onChange={(e) => setInterestPortion(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-card-hover)",
+                    color: "var(--text-main)",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#ef4444",
+                    marginBottom: 6,
+                  }}
+                >
+                  Penalty Amount (Posted to Penalties Table) (₱)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={penaltyPortion}
+                  onChange={(e) => setPenaltyPortion(e.target.value)}
                   style={{
                     width: "100%",
                     padding: "10px 12px",
