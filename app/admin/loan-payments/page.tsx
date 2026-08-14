@@ -1,260 +1,267 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
-import AdminNav from "../admin-nav";
+import SignaturePad, { SignaturePadHandle } from "../../signature-pad";
+
+type Loan = {
+  id: string;
+  principal_amount: number;
+  coop_accounts: { account_name: string } | null;
+};
+
+type DueInfo = {
+  installment_number: number | null;
+  due_date: string | null;
+  principal_due: number;
+  interest_due: number;
+  extra_interest_due: number;
+  penalty_due: number;
+  total_due: number;
+  days_late: number;
+  loan_status: string;
+};
 
 function fmt(amount: number) {
-  return Number(amount || 0).toLocaleString("en-PH", {
+  return Number(amount).toLocaleString("en-PH", {
     style: "currency",
     currency: "PHP",
   });
 }
 
-type PendingPayment = {
-  id: string;
-  principal_portion: number;
-  interest_portion: number;
-  pay_date: string;
-  submitted_by: string;
-  signature_url: string | null;
-  loans: {
-    borrower_type: "member" | "non_member";
-    borrower_name: string | null;
-    coop_accounts: {
-      account_name: string;
-      profiles: { first_name: string | null; last_name: string | null } | null;
-    } | null;
-  } | null;
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  upcoming: { label: "Not due yet", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
+  grace: { label: "Grace period", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" },
+  overdue: { label: "Overdue", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
+  completed: { label: "Fully paid", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" },
 };
 
-type ActiveLoan = {
-  id: string;
-  borrower_type: "member" | "non_member";
-  borrower_name: string | null;
-  principal_amount: number;
-  coop_accounts: {
-    account_name: string;
-    profiles: { first_name: string | null; last_name: string | null } | null;
-  } | null;
-};
-
-export default function AdminLoanPaymentsPage() {
+export default function PayLoanPage() {
+  const router = useRouter();
   const supabase = createClient();
+  const sigRef = useRef<SignaturePadHandle>(null);
 
-  const [pending, setPending] = useState<PendingPayment[]>([]);
-  const [activeLoans, setActiveLoans] = useState<
-    (ActiveLoan & { principal_paid: number; due?: any })[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-  const [actingId, setActingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [activeSignature, setActiveSignature] = useState<string | null>(null);
-
-  // record-payment form state
-  const [recordLoanId, setRecordLoanId] = useState("");
-  const [recordPrincipal, setRecordPrincipal] = useState("");
-  const [recordInterest, setRecordInterest] = useState("");
-  const [recordDate, setRecordDate] = useState(
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [loanId, setLoanId] = useState("");
+  const [due, setDue] = useState<DueInfo | null>(null);
+  const [principalPortion, setPrincipalPortion] = useState("");
+  const [interestPortion, setInterestPortion] = useState("");
+  const [payDate, setPayDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
-  const [recording, setRecording] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingLoans, setLoadingLoans] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  function selectRecordLoan(id: string) {
-    setRecordLoanId(id);
-    const l = activeLoans.find((x) => x.id === id);
-    if (l?.due) {
-      setRecordPrincipal(String(l.due.principal_due || ""));
-      setRecordInterest(
-        String(
-          Number(l.due.interest_due || 0) +
-            Number(l.due.extra_interest_due || 0) +
-            Number(l.due.penalty_due || 0) || ""
-        )
-      );
-    }
-  }
-
-  async function load() {
-    setLoading(true);
-
-    const { data: pendingData, error: pendingError } = await supabase
-      .from("loan_payments")
-      .select(
-        `id, principal_portion, interest_portion, pay_date, submitted_by, signature_url,
-         loans(borrower_type, borrower_name, coop_accounts(account_name, profiles(first_name,last_name)))`
-      )
-      .eq("status", "pending")
-      .order("created_at", { ascending: true });
-
-    if (pendingError) setError(pendingError.message);
-    setPending((pendingData as any) ?? []);
-
-    const { data: loansData } = await supabase
-      .from("loans")
-      .select(
-        "id, borrower_type, borrower_name, principal_amount, coop_accounts(account_name, profiles(first_name,last_name))"
-      )
-      .in("status", ["approved", "active"]);
-
-    const withBalances = [];
-    for (const l of (loansData as any) ?? []) {
-      const { data: payments } = await supabase
-        .from("loan_payments")
-        .select("principal_portion")
-        .eq("loan_id", l.id)
-        .eq("status", "approved");
-
-      const paid = (payments ?? []).reduce(
-        (s, p) => s + Number(p.principal_portion),
-        0
-      );
-      const { data: dueData } = await supabase.rpc("get_loan_due_now", {
-        p_loan_id: l.id,
-      });
-
-      withBalances.push({
-        ...l,
-        principal_paid: paid,
-        due: dueData && dueData.length > 0 ? dueData[0] : null,
-      });
-    }
-
-    setActiveLoans(withBalances);
-    if (withBalances.length > 0 && !recordLoanId) {
-      setRecordLoanId(withBalances[0].id);
-    }
-
-    setLoading(false);
-  }
+  // App settings state for custom penalty rate from row id = 1
+  const [penaltyRate, setPenaltyRate] = useState<number>(10.00);
 
   useEffect(() => {
+    async function load() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      // Fetch app settings penalty rate
+      const { data: settingsData } = await supabase
+        .from("app_settings")
+        .select("late_penalty_rate")
+        .eq("id", 1)
+        .single();
+
+      if (settingsData && settingsData.late_penalty_rate !== null) {
+        setPenaltyRate(Number(settingsData.late_penalty_rate));
+      }
+
+      const { data: accounts } = await supabase
+        .from("coop_accounts")
+        .select("id")
+        .eq("profile_id", user.id);
+
+      const accountIds = (accounts ?? []).map((a) => a.id);
+      if (accountIds.length === 0) {
+        setLoadingLoans(false);
+        return;
+      }
+
+      const { data: loanRows } = await supabase
+        .from("loans")
+        .select("id, principal_amount, coop_accounts(account_name)")
+        .in("account_id", accountIds)
+        .in("status", ["approved", "active", "Approved", "Active"]);
+
+      const fetchedLoans = (loanRows as unknown as Loan[]) ?? [];
+      setLoans(fetchedLoans);
+      if (fetchedLoans.length > 0) setLoanId(fetchedLoans[0].id);
+      setLoadingLoans(false);
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function act(id: string, status: "approved" | "rejected") {
-    setActingId(id);
-    setError(null);
-    setMessage(null);
-
-    const { error } = await supabase
-      .from("loan_payments")
-      .update({ status })
-      .eq("id", id);
-
-    if (error) {
-      setError(error.message);
-    } else {
-      setMessage(`Payment ${status}.`);
-      await load();
+  useEffect(() => {
+    async function loadDue() {
+      if (!loanId) {
+        setDue(null);
+        return;
+      }
+      const { data } = await supabase.rpc("get_loan_due_now", {
+        p_loan_id: loanId,
+      });
+      if (data && data.length > 0) {
+        const d = data[0] as DueInfo;
+        
+        // If your database function returns standard penalty, you can scale or adjust it 
+        // using the dynamic penaltyRate percentage if needed.
+        setDue(d);
+        setPrincipalPortion(String(d.principal_due || ""));
+        
+        const totalInterestAndPenalty =
+          Number(d.interest_due || 0) +
+          Number(d.extra_interest_due || 0) +
+          Number(d.penalty_due || 0);
+          
+        setInterestPortion(String(totalInterestAndPenalty || ""));
+      }
     }
-    setActingId(null);
-  }
+    loadDue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loanId]);
 
-  async function handleRecord(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setMessage(null);
 
-    const principal = Number(recordPrincipal || 0);
-    const interest = Number(recordInterest || 0);
-    if (!recordLoanId || (principal <= 0 && interest <= 0)) {
-      setError("Pick a loan and enter at least a principal or interest amount.");
+    if (!loanId) {
+      setError("Select a loan to pay toward.");
+      return;
+    }
+    const principal = Number(principalPortion || 0);
+    const interest = Number(interestPortion || 0);
+    if (principal <= 0 && interest <= 0) {
+      setError("Enter at least a principal or interest amount.");
+      return;
+    }
+    if (!sigRef.current || sigRef.current.isEmpty()) {
+      setError("Please sign to confirm this payment.");
       return;
     }
 
-    setRecording(true);
+    setLoading(true);
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const { error } = await supabase.from("loan_payments").insert({
-      loan_id: recordLoanId,
-      principal_portion: principal,
-      interest_portion: interest,
-      pay_date: recordDate,
-      post_date: recordDate,
-      submitted_by: "admin",
-      status: "approved",
-      updated_by: user?.id,
-    });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      setMessage("Payment recorded successfully.");
-      setRecordPrincipal("");
-      setRecordInterest("");
-      await load();
+    if (!user) {
+      router.push("/login");
+      return;
     }
-    setRecording(false);
-  }
 
-  function copyLink(loanId: string) {
-    const url = `${window.location.origin}/loan-pay/${loanId}`;
-    navigator.clipboard.writeText(url);
-    setMessage("Payment link copied to clipboard.");
-  }
+    try {
+      const blob = await sigRef.current.getBlob();
+      if (!blob) throw new Error("Couldn't capture the signature.");
 
-  function borrowerLabel(loan: {
-    borrower_type: "member" | "non_member";
-    borrower_name: string | null;
-    coop_accounts: {
-      account_name: string;
-      profiles: { first_name: string | null; last_name: string | null } | null;
-    } | null;
-  }) {
-    if (loan.borrower_type === "member") {
-      return (
-        [
-          loan.coop_accounts?.profiles?.first_name,
-          loan.coop_accounts?.profiles?.last_name,
-        ]
-          .filter(Boolean)
-          .join(" ") || "Member"
-      );
+      const path = `${user.id}/loan-payment-${Date.now()}.png`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("loan-signatures")
+        .upload(path, blob, { contentType: "image/png" });
+
+      if (uploadError) throw uploadError;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("loan-signatures").getPublicUrl(path);
+
+      const { error: insertError } = await supabase
+        .from("loan_payments")
+        .insert({
+          loan_id: loanId,
+          principal_portion: principal,
+          interest_portion: interest,
+          signature_url: publicUrl,
+          pay_date: payDate,
+          submitted_by: "member",
+        });
+
+      if (insertError) throw insertError;
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message ?? "Something went wrong.");
+      setLoading(false);
     }
-    return loan.borrower_name ?? "Non-Member";
   }
+
+  const currentPrincipal = Number(principalPortion) || 0;
+  const currentInterest = Number(interestPortion) || 0;
+  const totalPayment = currentPrincipal + currentInterest;
+  const statusInfo = due ? STATUS_CONFIG[due.loan_status] : null;
 
   return (
-    <div>
-      <AdminNav />
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px 16px",
+        background: "var(--bg-main)",
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border-color)",
+          borderRadius: 16,
+          padding: 28,
+          maxWidth: 480,
+          width: "100%",
+          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.12)",
+        }}
+      >
+        {/* Navigation Link */}
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text-sub)",
+            textDecoration: "none",
+            marginBottom: 20,
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
 
-      <div className="dashboard-container">
-        {/* Navigation Breadcrumb */}
-        <div style={{ marginBottom: 12 }}>
-          <Link
-            href="/admin"
-            style={{
-              color: "var(--text-sub)",
-              textDecoration: "none",
-              fontSize: 13,
-              fontWeight: 500,
-            }}
-          >
-            ← Back to Dashboard
-          </Link>
-        </div>
-
-        {/* Header Title */}
-        <div style={{ marginBottom: 24 }}>
-          <span className="badge admin" style={{ marginBottom: 6 }}>
-            FINANCE MANAGEMENT
-          </span>
-          <h1 style={{ fontSize: 24, fontWeight: 800, margin: "4px 0" }}>
-            Loan Payments
-          </h1>
+        {/* Title */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>
+              Pay Loan
+            </h1>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-sub)" }}>
+              Penalty Rate: {penaltyRate}%
+            </span>
+          </div>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Review pending submissions, manage active loan balances, and log payments.
+            Amounts due are calculated automatically including penalties. Submitted payments undergo admin review.
           </p>
         </div>
 
-        {/* Global Notifications */}
+        {/* Error Alert */}
         {error && (
           <div
             style={{
@@ -264,375 +271,42 @@ export default function AdminLoanPaymentsPage() {
               padding: "10px 14px",
               borderRadius: 8,
               fontSize: 13,
-              marginBottom: 16,
+              marginBottom: 18,
             }}
           >
             {error}
           </div>
         )}
-        {message && (
-          <div
-            style={{
-              background: "rgba(16, 185, 129, 0.1)",
-              border: "1px solid rgba(16, 185, 129, 0.3)",
-              color: "#10b981",
-              padding: "10px 14px",
-              borderRadius: 8,
-              fontSize: 13,
-              marginBottom: 16,
-            }}
-          >
-            {message}
-          </div>
-        )}
 
-        {/* 1. SECTION: PENDING PAYMENTS */}
-        <div className="section-title">Pending Payments</div>
-
-        {loading && (
-          <div style={{ padding: 24, textAlign: "center", color: "var(--text-sub)", fontSize: 14 }}>
-            Loading pending payments...
-          </div>
-        )}
-
-        {!loading && pending.length === 0 && (
-          <div
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-color)",
-              borderRadius: 12,
-              padding: 24,
-              textAlign: "center",
-              color: "var(--text-sub)",
-              marginBottom: 28,
-            }}
-          >
-            No pending payments awaiting review.
-          </div>
-        )}
-
-        {!loading && pending.length > 0 && (
-          <div style={{ marginBottom: 32 }}>
-            {/* Desktop Pending Table */}
-            <div className="desktop-table-view">
-              <div className="table-wrapper">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Borrower</th>
-                      <th>Principal</th>
-                      <th>Interest</th>
-                      <th>Pay Date</th>
-                      <th>Submitted By</th>
-                      <th>Signature</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pending.map((p) => (
-                      <tr key={p.id}>
-                        <td style={{ fontWeight: 600 }}>
-                          {p.loans ? borrowerLabel(p.loans) : "—"}
-                        </td>
-                        <td>{fmt(p.principal_portion)}</td>
-                        <td>{fmt(p.interest_portion)}</td>
-                        <td style={{ color: "var(--text-sub)", fontSize: 13 }}>
-                          {p.pay_date}
-                        </td>
-                        <td>
-                          <span
-                            className="badge"
-                            style={{
-                              background: "var(--bg-card-hover)",
-                              color: "var(--text-sub)",
-                              border: "1px solid var(--border-color)",
-                            }}
-                          >
-                            {p.submitted_by}
-                          </span>
-                        </td>
-                        <td>
-                          {p.signature_url ? (
-                            <button
-                              type="button"
-                              className="btn-secondary-sm"
-                              onClick={() => setActiveSignature(p.signature_url)}
-                            >
-                              View
-                            </button>
-                          ) : (
-                            <span style={{ color: "var(--text-sub)", fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                            <button
-                              disabled={actingId === p.id}
-                              onClick={() => act(p.id, "approved")}
-                              className="btn-approve-sm"
-                            >
-                              {actingId === p.id ? "..." : "Approve"}
-                            </button>
-                            <button
-                              disabled={actingId === p.id}
-                              onClick={() => act(p.id, "rejected")}
-                              className="btn-reject-sm"
-                            >
-                              {actingId === p.id ? "..." : "Reject"}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Mobile Pending Cards */}
-            <div className="mobile-card-list">
-              {pending.map((p) => (
-                <div key={p.id} className="mobile-member-card">
-                  <div className="mobile-member-header">
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>
-                        {p.loans ? borrowerLabel(p.loans) : "—"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 2 }}>
-                        Submitted by: {p.submitted_by}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mobile-member-details">
-                    <div className="detail-row">
-                      <span>Principal Portion</span>
-                      <strong>{fmt(p.principal_portion)}</strong>
-                    </div>
-                    <div className="detail-row">
-                      <span>Interest Portion</span>
-                      <strong>{fmt(p.interest_portion)}</strong>
-                    </div>
-                    <div className="detail-row">
-                      <span>Pay Date</span>
-                      <span>{p.pay_date}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Signature Proof</span>
-                      {p.signature_url ? (
-                        <button
-                          type="button"
-                          className="btn-secondary-sm"
-                          onClick={() => setActiveSignature(p.signature_url)}
-                        >
-                          View Signature
-                        </button>
-                      ) : (
-                        <span>—</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 8,
-                      marginTop: 14,
-                    }}
-                  >
-                    <button
-                      disabled={actingId === p.id}
-                      onClick={() => act(p.id, "approved")}
-                      className="btn-approve-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
-                    >
-                      {actingId === p.id ? "..." : "Approve"}
-                    </button>
-                    <button
-                      disabled={actingId === p.id}
-                      onClick={() => act(p.id, "rejected")}
-                      className="btn-reject-sm"
-                      style={{ padding: "10px 0", fontSize: 13 }}
-                    >
-                      {actingId === p.id ? "..." : "Reject"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 2. SECTION: ACTIVE LOANS */}
-        <div className="section-title">Active Loans Overview</div>
-
-        {!loading && activeLoans.length === 0 && (
-          <div
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-color)",
-              borderRadius: 12,
-              padding: 24,
-              textAlign: "center",
-              color: "var(--text-sub)",
-              marginBottom: 28,
-            }}
-          >
-            No active or approved loans.
-          </div>
-        )}
-
-        {!loading && activeLoans.length > 0 && (
-          <div style={{ marginBottom: 32 }}>
-            {/* Desktop Active Loans Table */}
-            <div className="desktop-table-view">
-              <div className="table-wrapper">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Borrower</th>
-                      <th>Type</th>
-                      <th>Principal</th>
-                      <th>Remaining Balance</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeLoans.map((l) => (
-                      <tr key={l.id}>
-                        <td style={{ fontWeight: 600 }}>{borrowerLabel(l)}</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              l.borrower_type === "member" ? "user" : "admin"
-                            }`}
-                          >
-                            {l.borrower_type === "member" ? "Member" : "Referred"}
-                          </span>
-                        </td>
-                        <td>{fmt(l.principal_amount)}</td>
-                        <td style={{ fontWeight: 700 }}>
-                          {fmt(Number(l.principal_amount) - l.principal_paid)}
-                        </td>
-                        <td>
-                          {l.due && (
-                            <span
-                              className={`badge ${
-                                l.due.loan_status === "overdue"
-                                  ? "danger"
-                                  : l.due.loan_status === "grace"
-                                  ? "pending"
-                                  : "user"
-                              }`}
-                            >
-                              {l.due.loan_status}
-                              {l.due.days_late > 0 ? ` · ${l.due.days_late}d late` : ""}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {l.borrower_type === "non_member" && (
-                            <button
-                              type="button"
-                              className="btn-secondary-sm"
-                              onClick={() => copyLink(l.id)}
-                            >
-                              Copy Link
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Mobile Active Loans Cards */}
-            <div className="mobile-card-list">
-              {activeLoans.map((l) => (
-                <div key={l.id} className="mobile-member-card">
-                  <div className="mobile-member-header">
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{borrowerLabel(l)}</div>
-                      <span
-                        className={`badge ${
-                          l.borrower_type === "member" ? "user" : "admin"
-                        }`}
-                        style={{ marginTop: 4 }}
-                      >
-                        {l.borrower_type === "member" ? "Member" : "Referred"}
-                      </span>
-                    </div>
-                    {l.due && (
-                      <span
-                        className={`badge ${
-                          l.due.loan_status === "overdue"
-                            ? "danger"
-                            : l.due.loan_status === "grace"
-                            ? "pending"
-                            : "user"
-                        }`}
-                      >
-                        {l.due.loan_status}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mobile-member-details">
-                    <div className="detail-row">
-                      <span>Total Principal</span>
-                      <span>{fmt(l.principal_amount)}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Remaining Balance</span>
-                      <strong style={{ fontSize: 15 }}>
-                        {fmt(Number(l.principal_amount) - l.principal_paid)}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {l.borrower_type === "non_member" && (
-                    <button
-                      type="button"
-                      className="btn-secondary-sm"
-                      onClick={() => copyLink(l.id)}
-                      style={{ width: "100%", marginTop: 12, padding: "8px 0" }}
-                    >
-                      Copy Payment Link
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 3. SECTION: RECORD A PAYMENT FORM */}
-        <div className="section-title">Manual Payment Entry</div>
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-color)",
-            borderRadius: 12,
-            padding: 24,
-            maxWidth: 600,
-          }}
-        >
-          <form onSubmit={handleRecord} style={{ display: "grid", gap: 16 }}>
+        {loadingLoans ? (
+          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
+            Loading your loans...
+          </p>
+        ) : loans.length === 0 ? (
+          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
+            You don't have any active loans to pay.
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
+            {/* Loan Select */}
             <div>
               <label
-                htmlFor="recordLoan"
-                style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
+                htmlFor="loan"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                  marginBottom: 6,
+                }}
               >
                 Select Active Loan
               </label>
               <select
-                id="recordLoan"
-                value={recordLoanId}
-                onChange={(e) => selectRecordLoan(e.target.value)}
+                id="loan"
+                value={loanId}
+                onChange={(e) => setLoanId(e.target.value)}
+                required
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -641,84 +315,132 @@ export default function AdminLoanPaymentsPage() {
                   background: "var(--bg-card-hover)",
                   color: "var(--text-main)",
                   fontSize: 14,
+                  outline: "none",
                 }}
               >
-                {activeLoans.map((l) => (
+                {loans.map((l) => (
                   <option key={l.id} value={l.id}>
-                    {borrowerLabel(l)} — Balance: {fmt(Number(l.principal_amount) - l.principal_paid)}
+                    {l.coop_accounts?.account_name ?? "Loan"} — {fmt(l.principal_amount)}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div>
-                <label
-                  htmlFor="recordPrincipal"
-                  style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
-                >
-                  Principal Amount
-                </label>
-                <input
-                  id="recordPrincipal"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={recordPrincipal}
-                  onChange={(e) => setRecordPrincipal(e.target.value)}
-                  placeholder="0.00"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-card-hover)",
-                    color: "var(--text-main)",
-                    fontSize: 14,
-                  }}
-                />
-              </div>
+            {/* Loan Due Summary Breakdown Card */}
+            {due && due.loan_status !== "completed" && (
+              <div
+                style={{
+                  background: "var(--bg-card-hover)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 10,
+                  padding: 14,
+                  display: "grid",
+                  gap: 8,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span
+                    style={{
+                      background: statusInfo?.bg ?? "rgba(255,255,255,0.1)",
+                      color: statusInfo?.color ?? "var(--text-main)",
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {statusInfo?.label ?? due.loan_status}
+                  </span>
+                  {due.due_date && (
+                    <span style={{ color: "var(--text-sub)", fontSize: 12 }}>
+                      Due Date: {due.due_date}
+                      {due.days_late > 0 && (
+                        <strong style={{ color: "#ef4444", marginLeft: 6 }}>
+                          ({due.days_late}d late)
+                        </strong>
+                      )}
+                    </span>
+                  )}
+                </div>
 
-              <div>
-                <label
-                  htmlFor="recordInterest"
-                  style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
-                >
-                  Interest Amount
-                </label>
-                <input
-                  id="recordInterest"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={recordInterest}
-                  onChange={(e) => setRecordInterest(e.target.value)}
-                  placeholder="0.00"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border-color)",
-                    background: "var(--bg-card-hover)",
-                    color: "var(--text-main)",
-                    fontSize: 14,
-                  }}
-                />
+                <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "var(--text-sub)" }}>Principal Due:</span>
+                    <span>{fmt(due.principal_due)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "var(--text-sub)" }}>Interest Due:</span>
+                    <span>{fmt(due.interest_due)}</span>
+                  </div>
+                  {due.extra_interest_due > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "var(--text-sub)" }}>Extra Interest:</span>
+                      <span>{fmt(due.extra_interest_due)}</span>
+                    </div>
+                  )}
+                  {due.penalty_due > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "#ef4444" }}>Late Penalty ({penaltyRate}%):</span>
+                      <span style={{ color: "#ef4444" }}>{fmt(due.penalty_due)}</span>
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      borderTop: "1px dashed var(--border-color)",
+                      paddingTop: 6,
+                      marginTop: 2,
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>Total Calculated Due:</span>
+                    <span style={{ color: "#10b981" }}>{fmt(due.total_due)}</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
+            {due && due.loan_status === "completed" && (
+              <div
+                style={{
+                  background: "rgba(16, 185, 129, 0.1)",
+                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                  color: "#10b981",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                🎉 This loan is fully paid.
+              </div>
+            )}
+
+            {/* Principal Portion */}
             <div>
               <label
-                htmlFor="recordDate"
-                style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
+                htmlFor="principalPortion"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                  marginBottom: 6,
+                }}
               >
-                Payment Date
+                Principal Amount (₱)
               </label>
               <input
-                id="recordDate"
-                type="date"
-                value={recordDate}
-                onChange={(e) => setRecordDate(e.target.value)}
+                id="principalPortion"
+                type="number"
+                min="0"
+                step="0.01"
+                value={principalPortion}
+                onChange={(e) => setPrincipalPortion(e.target.value)}
+                placeholder="0.00"
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -727,81 +449,146 @@ export default function AdminLoanPaymentsPage() {
                   background: "var(--bg-card-hover)",
                   color: "var(--text-main)",
                   fontSize: 14,
+                  outline: "none",
                 }}
               />
             </div>
 
+            {/* Interest Portion */}
+            <div>
+              <label
+                htmlFor="interestPortion"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                  marginBottom: 6,
+                }}
+              >
+                Interest & Penalty Amount (₱)
+              </label>
+              <input
+                id="interestPortion"
+                type="number"
+                min="0"
+                step="0.01"
+                value={interestPortion}
+                onChange={(e) => setInterestPortion(e.target.value)}
+                placeholder="0.00"
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-card-hover)",
+                  color: "var(--text-main)",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            {/* Total Payment Preview */}
+            {totalPayment > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "rgba(16, 185, 129, 0.08)",
+                  border: "1px dashed rgba(16, 185, 129, 0.3)",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ color: "var(--text-sub)" }}>Total Payment Amount:</span>
+                <strong style={{ fontSize: 15, color: "#10b981" }}>
+                  {fmt(totalPayment)}
+                </strong>
+              </div>
+            )}
+
+            {/* Pay Date */}
+            <div>
+              <label
+                htmlFor="payDate"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                  marginBottom: 6,
+                }}
+              >
+                Payment Date
+              </label>
+              <input
+                id="payDate"
+                type="date"
+                required
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-card-hover)",
+                  color: "var(--text-main)",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            {/* Signature Area */}
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                  marginBottom: 6,
+                }}
+              >
+                Payer Signature
+              </label>
+              <div
+                style={{
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  background: "#ffffff",
+                }}
+              >
+                <SignaturePad ref={sigRef} width={420} height={140} />
+              </div>
+            </div>
+
+            {/* Submit Action */}
             <button
               type="submit"
-              disabled={recording}
+              disabled={loading || (due?.loan_status === "completed")}
               className="btn-approve-sm"
               style={{
                 width: "100%",
                 padding: "12px 0",
                 fontSize: 14,
-                marginTop: 8,
+                fontWeight: 600,
+                marginTop: 4,
+                height: 44,
+                opacity: due?.loan_status === "completed" ? 0.5 : 1,
+                cursor: due?.loan_status === "completed" ? "not-allowed" : "pointer",
               }}
             >
-              {recording ? "Recording Payment..." : "Record Payment"}
+              {loading ? "Submitting Payment..." : "Submit Payment for Approval"}
             </button>
           </form>
-        </div>
+        )}
       </div>
-
-      {/* Signature Lightbox Modal */}
-      {activeSignature && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            background: "rgba(0,0,0,0.75)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 16,
-          }}
-          onClick={() => setActiveSignature(null)}
-        >
-          <div
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-color)",
-              borderRadius: 16,
-              padding: 20,
-              maxWidth: 400,
-              width: "100%",
-              textAlign: "center",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Payment Signature</h3>
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 16,
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={activeSignature}
-                alt="Payment Signature"
-                style={{ maxWidth: "100%", maxHeight: 200, objectFit: "contain" }}
-              />
-            </div>
-            <button
-              type="button"
-              className="btn-secondary-sm"
-              style={{ width: "100%", padding: 10 }}
-              onClick={() => setActiveSignature(null)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
