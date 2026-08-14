@@ -15,7 +15,7 @@ type SupabaseProfile = {
 
 type SupabaseCoopAccount = {
   account_name: string;
-  user_id?: string;
+  profile_id?: string;
   profiles: SingleOrArray<SupabaseProfile> | null;
 };
 
@@ -60,7 +60,9 @@ function getMemberDetails(row: Row) {
 
   const initial = (profile?.first_name?.[0] || "M").toUpperCase();
   const accountName = account?.account_name ?? "—";
-  const userId = account?.user_id ?? profile?.id;
+  
+  // profile_id from coop_accounts corresponds to the user/profile id
+  const userId = account?.profile_id ?? profile?.id;
 
   return { memberName, initial, accountName, userId };
 }
@@ -90,7 +92,7 @@ export default function AdminContributionsPage() {
     const { data, error } = await supabase
       .from("contributions")
       .select(
-        "id, amount, pay_date, signature_url, status, coop_accounts(account_name, user_id, profiles(id, first_name, last_name))"
+        "id, amount, pay_date, signature_url, status, coop_accounts(account_name, profile_id, profiles(id, first_name, last_name))"
       )
       .eq("status", activeTab)
       .order("created_at", { ascending: false });
@@ -251,17 +253,10 @@ export default function AdminContributionsPage() {
       setError(error.message);
     } else {
       if (status === "approved") {
-        const userIds = targetRows
-          .map((r) => getMemberDetails(r).userId)
-          .filter(Boolean) as string[];
-
-        if (userIds.length > 0) {
-          // Send summary or bulk notifications
-          for (const row of targetRows) {
-            const { userId } = getMemberDetails(row);
-            if (userId) {
-              await sendApprovalNotification([userId], fmt(row.amount));
-            }
+        for (const row of targetRows) {
+          const { userId } = getMemberDetails(row);
+          if (userId) {
+            await sendApprovalNotification([userId], fmt(row.amount));
           }
         }
       }
