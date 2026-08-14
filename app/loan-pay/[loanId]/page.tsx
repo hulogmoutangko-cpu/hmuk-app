@@ -24,17 +24,19 @@ type DueInfo = {
 };
 
 function fmt(amount: number) {
-  return Number(amount || 0).toLocaleString("en-PH", {
+  const wholeAmount = Math.ceil(Number(amount) || 0);
+  return wholeAmount.toLocaleString("en-PH", {
     style: "currency",
     currency: "PHP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  upcoming: "Not due yet",
-  grace: "Grace period",
-  overdue: "Overdue",
-  completed: "Fully paid",
+const STATUS_LABEL: Record<string, { label: string; color: string; bg: string }> = {
+  upcoming: { label: "Active / Unpaid", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
+  overdue: { label: "Overdue (1+ Day Late)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
+  completed: { label: "Fully paid", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" },
 };
 
 export default function LoanPayPage() {
@@ -48,6 +50,7 @@ export default function LoanPayPage() {
   const [notFound, setNotFound] = useState(false);
   const [principalPortion, setPrincipalPortion] = useState("");
   const [interestPortion, setInterestPortion] = useState("");
+  const [penaltyPortion, setPenaltyPortion] = useState("");
   const [payDate, setPayDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -73,14 +76,16 @@ export default function LoanPayPage() {
       if (dueData && dueData.length > 0) {
         const d = dueData[0] as DueInfo;
         setDue(d);
-        setPrincipalPortion(String(d.principal_due || ""));
+        setPrincipalPortion(String(Math.ceil(d.principal_due || 0)));
         setInterestPortion(
           String(
-            Number(d.interest_due || 0) +
-              Number(d.extra_interest_due || 0) +
-              Number(d.penalty_due || 0) || ""
+            Math.ceil(
+              Number(d.interest_due || 0) +
+                Number(d.extra_interest_due || 0)
+            )
           )
         );
+        setPenaltyPortion(String(Math.ceil(d.penalty_due || 0)));
       }
     }
     load();
@@ -91,10 +96,12 @@ export default function LoanPayPage() {
     e.preventDefault();
     setError(null);
 
-    const principal = Number(principalPortion || 0);
-    const interest = Number(interestPortion || 0);
-    if (principal <= 0 && interest <= 0) {
-      setError("Please enter at least a principal or interest amount.");
+    const principal = Math.ceil(Number(principalPortion || 0));
+    const interest = Math.ceil(Number(interestPortion || 0));
+    const penalty = Math.ceil(Number(penaltyPortion || 0));
+
+    if (principal <= 0 && interest <= 0 && penalty <= 0) {
+      setError("Please enter at least a principal, interest, or penalty amount.");
       return;
     }
     if (!sigRef.current || sigRef.current.isEmpty()) {
@@ -120,6 +127,7 @@ export default function LoanPayPage() {
         data: { publicUrl },
       } = supabase.storage.from("loan-signatures").getPublicUrl(path);
 
+      // 1. Insert into loan_payments table
       const { error: insertError } = await supabase
         .from("loan_payments")
         .insert({
@@ -132,6 +140,19 @@ export default function LoanPayPage() {
         });
 
       if (insertError) throw insertError;
+
+      // 2. Insert into penalties table if penalty portion exists
+      if (penalty > 0) {
+        const { error: penaltyError } = await supabase
+          .from("penalties")
+          .insert({
+            name: "Late Loan Penalty",
+            amount: penalty,
+            description: `Overdue penalty paid for non-member loan ID ${loanId}`,
+          });
+
+        if (penaltyError) throw penaltyError;
+      }
 
       setSubmitted(true);
     } catch (err: any) {
@@ -165,14 +186,7 @@ export default function LoanPayPage() {
     return (
       <div style={wrapperStyle}>
         <div style={{ ...cardStyle, textAlign: "center" }}>
-          <div
-            style={{
-              fontSize: 32,
-              marginBottom: 12,
-            }}
-          >
-            ⚠️
-          </div>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
           <h1 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
             Payment Link Not Found
           </h1>
@@ -188,14 +202,7 @@ export default function LoanPayPage() {
     return (
       <div style={wrapperStyle}>
         <div style={{ ...cardStyle, textAlign: "center" }}>
-          <div
-            style={{
-              fontSize: 36,
-              marginBottom: 12,
-            }}
-          >
-            ✅
-          </div>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
           <h1 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
             Payment Submitted
           </h1>
@@ -216,6 +223,12 @@ export default function LoanPayPage() {
       </div>
     );
   }
+
+  const statusConf = due ? STATUS_LABEL[due.loan_status] ?? { label: due.loan_status, color: "#3b82f6", bg: "rgba(59,130,246,0.1)" } : null;
+  const currentPrincipal = Math.ceil(Number(principalPortion) || 0);
+  const currentInterest = Math.ceil(Number(interestPortion) || 0);
+  const currentPenalty = Math.ceil(Number(penaltyPortion) || 0);
+  const totalPayment = currentPrincipal + currentInterest + currentPenalty;
 
   return (
     <div style={wrapperStyle}>
@@ -265,15 +278,17 @@ export default function LoanPayPage() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <span
-                className={`badge ${
-                  due.loan_status === "overdue"
-                    ? "danger"
-                    : due.loan_status === "grace"
-                    ? "pending"
-                    : "user"
-                }`}
+                style={{
+                  background: statusConf?.bg,
+                  color: statusConf?.color,
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                }}
               >
-                {STATUS_LABEL[due.loan_status] ?? due.loan_status}
+                {statusConf?.label}
               </span>
               {due.due_date && (
                 <span style={{ color: "var(--text-sub)", fontSize: 12 }}>
@@ -285,7 +300,7 @@ export default function LoanPayPage() {
             <div style={{ color: "var(--text-sub)", fontSize: 12 }}>
               Principal: <strong>{fmt(due.principal_due)}</strong> + Interest: <strong>{fmt(due.interest_due)}</strong>
               {due.extra_interest_due > 0 && <> + Extra: <strong>{fmt(due.extra_interest_due)}</strong></>}
-              {due.penalty_due > 0 && <> + Penalty: <strong>{fmt(due.penalty_due)}</strong></>}
+              {due.penalty_due > 0 && <> + Penalty: <strong style={{ color: "#ef4444" }}>{fmt(due.penalty_due)}</strong></>}
             </div>
 
             <div
@@ -331,16 +346,16 @@ export default function LoanPayPage() {
               htmlFor="principalPortion"
               style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
             >
-              Principal Amount
+              Principal Amount (₱)
             </label>
             <input
               id="principalPortion"
               type="number"
               min="0"
-              step="0.01"
+              step="1"
               value={principalPortion}
               onChange={(e) => setPrincipalPortion(e.target.value)}
-              placeholder="0.00"
+              placeholder="0"
               style={{
                 width: "100%",
                 padding: "10px 12px",
@@ -358,16 +373,16 @@ export default function LoanPayPage() {
               htmlFor="interestPortion"
               style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}
             >
-              Interest Amount (incl. Penalty)
+              Interest Amount (₱)
             </label>
             <input
               id="interestPortion"
               type="number"
               min="0"
-              step="0.01"
+              step="1"
               value={interestPortion}
               onChange={(e) => setInterestPortion(e.target.value)}
-              placeholder="0.00"
+              placeholder="0"
               style={{
                 width: "100%",
                 padding: "10px 12px",
@@ -379,6 +394,53 @@ export default function LoanPayPage() {
               }}
             />
           </div>
+
+          <div>
+            <label
+              htmlFor="penaltyPortion"
+              style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#ef4444", marginBottom: 6 }}
+            >
+              Penalty Amount (₱)
+            </label>
+            <input
+              id="penaltyPortion"
+              type="number"
+              min="0"
+              step="1"
+              value={penaltyPortion}
+              onChange={(e) => setPenaltyPortion(e.target.value)}
+              placeholder="0"
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--border-color)",
+                background: "var(--bg-card-hover)",
+                color: "var(--text-main)",
+                fontSize: 14,
+              }}
+            />
+          </div>
+
+          {totalPayment > 0 && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                background: "rgba(16, 185, 129, 0.08)",
+                border: "1px dashed rgba(16, 185, 129, 0.3)",
+                padding: "10px 14px",
+                borderRadius: 8,
+                fontSize: 13,
+              }}
+            >
+              <span style={{ color: "var(--text-sub)" }}>Combined Total Payment:</span>
+              <strong style={{ fontSize: 15, color: "#10b981" }}>
+                {fmt(totalPayment)}
+              </strong>
+            </div>
+          )}
 
           <div>
             <label

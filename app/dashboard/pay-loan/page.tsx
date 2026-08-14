@@ -37,8 +37,7 @@ function fmt(amount: number) {
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   upcoming: { label: "Active / Unpaid", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
-  grace: { label: "Grace Period", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" },
-  overdue: { label: "Overdue (Final Due Passed)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
+  overdue: { label: "Overdue (1+ Day Late)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
   completed: { label: "Fully paid", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" },
 };
 

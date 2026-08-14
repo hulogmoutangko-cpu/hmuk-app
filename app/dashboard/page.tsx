@@ -1,7 +1,10 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { createClient } from "@/utils/supabase/server";
+import { createClient } from "@/utils/supabase/client";
 import SignOutButton from "../sign-out-button";
 import ReferralShareCard from "@/components/ReferralShareCard";
 import OneSignalInit from "@/components/OneSignalInit";
@@ -20,6 +23,34 @@ import {
   Bell,
 } from "lucide-react";
 
+// Types and Helper function
+type Account = {
+  id: string;
+  account_name: string;
+  created_at: string;
+};
+
+type Profile = {
+  role: string;
+  first_name: string;
+  last_name: string;
+  profile_picture_url: string | null;
+  signature_url: string | null;
+  referral_code: string | null;
+};
+
+interface DashboardClientProps {
+  user: any;
+  profile: Profile | null;
+  accounts: Account[];
+  unreadCount: number;
+  totalContribution: number;
+  interestEarned: number;
+  interestPerAccountShare: number;
+  currentLoanAmount: number;
+  referralBonusEarned: number;
+}
+
 function fmt(amount: number) {
   return (amount || 0).toLocaleString("en-PH", {
     style: "currency",
@@ -27,258 +58,52 @@ function fmt(amount: number) {
   });
 }
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
+export default function DashboardClient({
+  user,
+  profile,
+  accounts,
+  unreadCount,
+  totalContribution,
+  interestEarned,
+  interestPerAccountShare,
+  currentLoanAmount,
+  referralBonusEarned,
+}: DashboardClientProps) {
+  const router = useRouter();
+  const supabase = createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Enable Realtime Subscriptions to instantly update values on DB mutations
+  useEffect(() => {
+    const channel = supabase
+      .channel("realtime-dashboard")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "loan_payments" },
+        () => {
+          router.refresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "contributions" },
+        () => {
+          router.refresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "loans" },
+        () => {
+          router.refresh();
+        }
+      )
+      .subscribe();
 
-  if (!user) {
-    redirect("/login");
-  }
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, router]);
 
-  // ---------------------------------------------------------
-  // GET PROFILE
-  // ---------------------------------------------------------
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      "role, first_name, last_name, profile_picture_url, signature_url, referral_code"
-    )
-    .eq("id", user.id)
-    .single();
-
-  // Admins should go to the admin dashboard
-  if (profile?.role === "admin") {
-    redirect("/admin");
-  }
-
-  // ---------------------------------------------------------
-  // UNREAD NOTIFICATIONS
-  // ---------------------------------------------------------
-  const { count: unreadCount } = await supabase
-    .from("user_notifications")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .eq("is_read", false);
-
-  // ---------------------------------------------------------
-  // GET USER'S CO-OP ACCOUNTS
-  // ---------------------------------------------------------
-  const { data: accounts } = await supabase
-    .from("coop_accounts")
-    .select("id, account_name, created_at")
-    .eq("profile_id", user.id)
-    .order("created_at", { ascending: true });
-
-  const accountIds = (accounts ?? []).map((a) => a.id);
-
-  // ---------------------------------------------------------
-  // FINANCIAL VARIABLES
-  // ---------------------------------------------------------
-  let totalContribution = 0;
-  let interestEarned = 0;
-  let interestPerAccountShare = 0;
-  let currentLoanAmount = 0;
-  let referralBonusEarned = 0;
-
-  // ---------------------------------------------------------
-  // USER FINANCIAL DATA
-  // ---------------------------------------------------------
-  if (accountIds.length > 0) {
-    /*
-     * IMPORTANT:
-     *
-     * We do NOT calculate the system-wide account count,
-     * interest, and penalties directly from normal Supabase
-     * queries because RLS can restrict those queries to only
-     * the current user's rows.
-     *
-     * Instead, get_interest_pool_stats() is a SECURITY DEFINER
-     * RPC that safely returns:
-     *
-     *   - total_accounts
-     *   - total_interest
-     *   - total_penalties
-     *
-     * This allows the correct system-wide calculation.
-     */
-
-    const [
-      { data: contributions },
-      { data: loans },
-      { data: interestPool },
-    ] = await Promise.all([
-      // -----------------------------------------------------
-      // USER CONTRIBUTIONS
-      // -----------------------------------------------------
-      supabase
-        .from("contributions")
-        .select("amount")
-        .in("account_id", accountIds)
-        .eq("status", "approved"),
-
-      // -----------------------------------------------------
-      // USER ACTIVE / APPROVED LOANS
-      // -----------------------------------------------------
-      supabase
-        .from("loans")
-        .select("id, principal_amount")
-        .in("account_id", accountIds)
-        .in("status", [
-          "approved",
-          "active",
-          "disbursed",
-          "Approved",
-          "Active",
-        ]),
-
-      // -----------------------------------------------------
-      // SYSTEM-WIDE INTEREST + PENALTIES + ACCOUNT COUNT
-      // -----------------------------------------------------
-      supabase.rpc("get_interest_pool_stats"),
-    ]);
-
-    // ---------------------------------------------------------
-    // TOTAL USER CONTRIBUTIONS
-    // ---------------------------------------------------------
-    totalContribution = (contributions ?? []).reduce(
-      (sum, c) => sum + Number(c.amount || 0),
-      0
-    );
-
-    // ---------------------------------------------------------
-    // READ SYSTEM-WIDE INTEREST POOL
-    // ---------------------------------------------------------
-    const poolStats = interestPool?.[0];
-
-    const totalSystemAccounts = Number(
-      poolStats?.total_accounts || 0
-    );
-
-    const totalApprovedInterest = Number(
-      poolStats?.total_interest || 0
-    );
-
-    const totalPenaltiesSum = Number(
-      poolStats?.total_penalties || 0
-    );
-
-    // ---------------------------------------------------------
-    // TOTAL DISTRIBUTABLE POOL
-    // ---------------------------------------------------------
-    const totalSystemPool =
-      totalApprovedInterest + totalPenaltiesSum;
-
-    /*
-     * IMPORTANT:
-     *
-     * Example:
-     *
-     * totalSystemPool = ₱2,050
-     * totalSystemAccounts = 20
-     *
-     * ₱2,050 / 20 = ₱102.50 per account
-     */
-    const systemAccountCount =
-      totalSystemAccounts > 0 ? totalSystemAccounts : 1;
-
-    interestPerAccountShare =
-      totalSystemPool / systemAccountCount;
-
-    /*
-     * User owns 10 accounts:
-     *
-     * ₱102.50 × 10 = ₱1,025
-     */
-    interestEarned =
-      interestPerAccountShare * accountIds.length;
-
-    // ---------------------------------------------------------
-    // USER LOAN BALANCE
-    // ---------------------------------------------------------
-    const activeLoanIds = (loans ?? []).map((l) => l.id);
-
-    let totalPrincipalPaid = 0;
-
-    if (activeLoanIds.length > 0) {
-      const { data: payments } = await supabase
-        .from("loan_payments")
-        .select("principal_portion")
-        .in("loan_id", activeLoanIds)
-        .eq("status", "approved");
-
-      totalPrincipalPaid = (payments ?? []).reduce(
-        (sum, p) => sum + Number(p.principal_portion || 0),
-        0
-      );
-    }
-
-    // ---------------------------------------------------------
-    // TOTAL PRINCIPAL ISSUED TO USER
-    // ---------------------------------------------------------
-    const totalPrincipalIssued = (loans ?? []).reduce(
-      (sum, l) => sum + Number(l.principal_amount || 0),
-      0
-    );
-
-    // ---------------------------------------------------------
-    // CURRENT LOAN BALANCE
-    // ---------------------------------------------------------
-    currentLoanAmount = Math.max(
-      0,
-      totalPrincipalIssued - totalPrincipalPaid
-    );
-  }
-
-  // ---------------------------------------------------------
-  // REFERRAL EARNINGS
-  // ---------------------------------------------------------
-  const { data: referredLoans } = await supabase
-    .from("loans")
-    .select("id")
-    .eq("referred_by", user.id);
-
-  const referredLoanIds = (referredLoans ?? []).map(
-    (l) => l.id
-  );
-
-  if (referredLoanIds.length > 0) {
-    const [
-      { data: intPayments },
-      { data: standardPayments },
-    ] = await Promise.all([
-      supabase
-        .from("loan_interest_payments")
-        .select("referral_amount")
-        .in("loan_id", referredLoanIds),
-
-      supabase
-        .from("loan_payments")
-        .select("referral_portion, referral_amount")
-        .in("loan_id", referredLoanIds)
-        .eq("status", "approved"),
-    ]);
-
-    const sum1 = (intPayments ?? []).reduce(
-      (sum, r) => sum + Number(r.referral_amount || 0),
-      0
-    );
-
-    const sum2 = (standardPayments ?? []).reduce(
-      (sum, r) =>
-        sum +
-        Number(r.referral_portion || r.referral_amount || 0),
-      0
-    );
-
-    referralBonusEarned = sum1 + sum2;
-  }
-
-  // ---------------------------------------------------------
-  // PAGE
-  // ---------------------------------------------------------
   return (
     <div
       style={{
@@ -442,9 +267,7 @@ export default async function DashboardPage() {
                   border: "2px solid rgba(255,255,255,0.2)",
                 }}
               >
-                {profile?.first_name
-                  ? profile.first_name[0]
-                  : "M"}
+                {profile?.first_name ? profile.first_name[0] : "M"}
               </div>
             )}
 
@@ -506,9 +329,7 @@ export default async function DashboardPage() {
               gap: 12,
             }}
           >
-            {/* -------------------------------------------------
-                TOTAL CONTRIBUTIONS
-            ------------------------------------------------- */}
+            {/* TOTAL CONTRIBUTIONS */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -555,9 +376,7 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* -------------------------------------------------
-                INTEREST EARNED
-            ------------------------------------------------- */}
+            {/* INTEREST EARNED */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -614,9 +433,7 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* -------------------------------------------------
-                ACTIVE LOAN BALANCE
-            ------------------------------------------------- */}
+            {/* LOAN BALANCE */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -663,9 +480,7 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* -------------------------------------------------
-                REFERRAL BONUS
-            ------------------------------------------------- */}
+            {/* REFERRAL BONUS */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -736,13 +551,9 @@ export default async function DashboardPage() {
               gap: 8,
             }}
           >
-            {/* + ACCOUNT */}
             <Link
               href="/dashboard/new-account"
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-              }}
+              style={{ textDecoration: "none", textAlign: "center" }}
             >
               <div
                 style={{
@@ -760,25 +571,14 @@ export default async function DashboardPage() {
               >
                 <PlusCircle size={20} />
               </div>
-
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 + Account
               </span>
             </Link>
 
-            {/* DEPOSIT */}
             <Link
               href="/dashboard/pay-contribution"
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-              }}
+              style={{ textDecoration: "none", textAlign: "center" }}
             >
               <div
                 style={{
@@ -796,25 +596,14 @@ export default async function DashboardPage() {
               >
                 <PiggyBank size={20} />
               </div>
-
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Deposit
               </span>
             </Link>
 
-            {/* APPLY LOAN */}
             <Link
               href="/dashboard/apply-loan"
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-              }}
+              style={{ textDecoration: "none", textAlign: "center" }}
             >
               <div
                 style={{
@@ -832,25 +621,14 @@ export default async function DashboardPage() {
               >
                 <FileText size={20} />
               </div>
-
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Apply Loan
               </span>
             </Link>
 
-            {/* PAY LOAN */}
             <Link
               href="/dashboard/pay-loan"
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-              }}
+              style={{ textDecoration: "none", textAlign: "center" }}
             >
               <div
                 style={{
@@ -868,25 +646,14 @@ export default async function DashboardPage() {
               >
                 <DollarSign size={20} />
               </div>
-
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 Pay Loan
               </span>
             </Link>
 
-            {/* HISTORY */}
             <Link
               href="/dashboard/history"
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-              }}
+              style={{ textDecoration: "none", textAlign: "center" }}
             >
               <div
                 style={{
@@ -904,14 +671,7 @@ export default async function DashboardPage() {
               >
                 <TrendingUp size={20} />
               </div>
-
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--text-sub)",
-                }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
                 History
               </span>
             </Link>
@@ -950,8 +710,7 @@ export default async function DashboardPage() {
                   fontSize: 13,
                 }}
               >
-                No accounts found. Create your first co-op
-                account above to begin contributing.
+                No accounts found. Create your first co-op account above to begin contributing.
               </div>
             ) : (
               (accounts ?? []).map((a, idx) => (
@@ -991,25 +750,11 @@ export default async function DashboardPage() {
                     </div>
 
                     <div>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: 14,
-                        }}
-                      >
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>
                         {a.account_name}
                       </div>
-
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--text-sub)",
-                        }}
-                      >
-                        Created{" "}
-                        {new Date(
-                          a.created_at
-                        ).toLocaleDateString()}
+                      <div style={{ fontSize: 12, color: "var(--text-sub)" }}>
+                        Created {new Date(a.created_at).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
@@ -1033,14 +778,13 @@ export default async function DashboardPage() {
           >
             Referral Program
           </div>
-
           <ReferralShareCard />
         </div>
       </div>
 
       {/* =======================================================
           FLOATING BOTTOM APP NAV BAR
-      ======================================================= */}
+      ================================================       */}
       <div
         style={{
           position: "fixed",
@@ -1057,7 +801,6 @@ export default async function DashboardPage() {
           zIndex: 100,
         }}
       >
-        {/* HOME */}
         <Link
           href="/dashboard"
           style={{
@@ -1070,18 +813,9 @@ export default async function DashboardPage() {
           }}
         >
           <Home size={20} />
-
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-            }}
-          >
-            Home
-          </span>
+          <span style={{ fontSize: 10, fontWeight: 600 }}>Home</span>
         </Link>
 
-        {/* SAVINGS */}
         <Link
           href="/dashboard/pay-contribution"
           style={{
@@ -1094,18 +828,9 @@ export default async function DashboardPage() {
           }}
         >
           <PiggyBank size={20} />
-
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-            }}
-          >
-            Savings
-          </span>
+          <span style={{ fontSize: 10, fontWeight: 600 }}>Savings</span>
         </Link>
 
-        {/* LOANS */}
         <Link
           href="/dashboard/apply-loan"
           style={{
@@ -1118,15 +843,7 @@ export default async function DashboardPage() {
           }}
         >
           <CreditCard size={20} />
-
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-            }}
-          >
-            Loans
-          </span>
+          <span style={{ fontSize: 10, fontWeight: 600 }}>Loans</span>
         </Link>
       </div>
     </div>
