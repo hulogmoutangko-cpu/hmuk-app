@@ -20,6 +20,7 @@ import {
   UserCheck,
   BellCheck,
   ChevronDown,
+  Wallet,
 } from 'lucide-react';
 
 interface AdminNavProps {
@@ -57,6 +58,7 @@ export default function AdminNav({ email, firstName }: AdminNavProps) {
     { label: "Contributions", href: "/admin/contributions", icon: PiggyBank },
     { label: "Loans", href: "/admin/loans", icon: Banknote },
     { label: "Payments", href: "/admin/loan-payments", icon: Receipt },
+    { label: "Withdrawals", href: "/admin/withdrawals", icon: Wallet },
     { label: "Members", href: "/admin/members", icon: Users },
   ];
 
