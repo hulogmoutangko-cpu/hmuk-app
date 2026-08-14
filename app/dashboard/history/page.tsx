@@ -24,7 +24,13 @@ function fmt(amount: number) {
 function StatusBadge({ status }: { status: string }) {
   const normalized = (status || "pending").toLowerCase();
 
-  if (normalized === "approved" || normalized === "posted" || normalized === "active") {
+  if (
+    normalized === "approved" ||
+    normalized === "posted" ||
+    normalized === "active" ||
+    normalized === "completed" ||
+    normalized === "fully paid"
+  ) {
     return (
       <span
         style={{
@@ -339,7 +345,6 @@ export default async function HistoryPage() {
             userLoans.map((loan) => {
               const payments = loanPaymentsGrouped[loan.id] || [];
               
-              // Calculate total principal paid to determine current balance
               const totalPrincipalPaid = payments.reduce(
                 (sum, p) => sum + Number(p.principal_portion || 0),
                 0
@@ -349,7 +354,6 @@ export default async function HistoryPage() {
                 Number(loan.principal_amount || 0) - totalPrincipalPaid
               );
 
-              // Calculate start date & due date
               const startDate = loan.approved_at || loan.applied_at;
               let dueDateStr = "N/A";
               if (startDate && loan.term_months) {
