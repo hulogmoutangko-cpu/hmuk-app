@@ -134,39 +134,17 @@ export default function PayContributionPage() {
         data: { publicUrl },
       } = supabase.storage.from("contribution-signatures").getPublicUrl(path);
 
-      // 2. Loop through each selected account to create penalty records (if late) and contribution records
+      // 2. Loop through each selected account and call our secure database function (RPC)
       for (const accId of selectedAccountIds) {
-        let penaltyIdToSave = null;
+        const { error: rpcError } = await supabase.rpc("create_contribution_with_penalty", {
+          p_account_id: accId,
+          p_amount: parsedAmount,
+          p_pay_date: payDate,
+          p_signature_url: publicUrl,
+          p_penalty_amount: isLate ? penaltyPerAccount : 0,
+        });
 
-        // If late, insert the penalty amount into the penalties table first
-        if (isLate && penaltyPerAccount > 0) {
-          const { data: penaltyData, error: penaltyError } = await supabase
-            .from("penalties")
-            .insert({
-              name: "Late Contribution Penalty",
-              amount: penaltyPerAccount, // Stores the exact penalty amount (e.g., 30)
-              description: `10% late fee for contribution on account ${accId}`
-            })
-            .select("id")
-            .single();
-
-          if (penaltyError) throw penaltyError;
-          penaltyIdToSave = penaltyData.id;
-        }
-
-        // 3. Insert the contribution record linking to the penalty ID
-        const { error: insertError } = await supabase
-          .from("contributions")
-          .insert({
-            account_id: accId,
-            amount: parsedAmount, // Stores the base contribution (e.g., 300)
-            pay_date: payDate,
-            signature_url: publicUrl,
-            penalty_id: penaltyIdToSave, // Links to the newly created penalty row
-            status: "pending"
-          });
-
-        if (insertError) throw insertError;
+        if (rpcError) throw rpcError;
       }
 
       router.push("/dashboard");
