@@ -13,7 +13,7 @@ type Loan = {
 };
 
 type DueInfo = {
-  installment_number: number | null;
+  installment_number: number;
   due_date: string | null;
   principal_due: number;
   interest_due: number;
@@ -22,6 +22,7 @@ type DueInfo = {
   total_due: number;
   days_late: number;
   loan_status: string;
+  is_final_installment: boolean;
 };
 
 function fmt(amount: number) {
@@ -32,9 +33,9 @@ function fmt(amount: number) {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  upcoming: { label: "Not due yet", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
-  grace: { label: "Grace period", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" },
-  overdue: { label: "Overdue", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
+  upcoming: { label: "Active / Unpaid", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" },
+  grace: { label: "Grace Period", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" },
+  overdue: { label: "Overdue (Final Due Passed)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
   completed: { label: "Fully paid", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" },
 };
 
@@ -45,7 +46,10 @@ export default function PayLoanPage() {
 
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loanId, setLoanId] = useState("");
-  const [due, setDue] = useState<DueInfo | null>(null);
+  const [installments, setInstallments] = useState<DueInfo[]>([]);
+  const [selectedInstallmentNum, setSelectedInstallmentNum] = useState<number>(1);
+  const [paymentOption, setPaymentOption] = useState<"full" | "interest_only">("full");
+
   const [principalPortion, setPrincipalPortion] = useState("");
   const [interestPortion, setInterestPortion] = useState("");
   const [payDate, setPayDate] = useState(
@@ -95,26 +99,45 @@ export default function PayLoanPage() {
   useEffect(() => {
     async function loadDue() {
       if (!loanId) {
-        setDue(null);
+        setInstallments([]);
         return;
       }
       const { data } = await supabase.rpc("get_loan_due_now", {
         p_loan_id: loanId,
       });
       if (data && data.length > 0) {
-        const d = data[0] as DueInfo;
-        setDue(d);
-        setPrincipalPortion(String(d.principal_due || ""));
-        const totalInterestAndPenalty =
-          Number(d.interest_due || 0) +
-          Number(d.extra_interest_due || 0) +
-          Number(d.penalty_due || 0);
-        setInterestPortion(String(totalInterestAndPenalty || ""));
+        const rows = data as DueInfo[];
+        setInstallments(rows);
+        if (rows.length > 0) {
+          setSelectedInstallmentNum(rows[0].installment_number);
+        }
+      } else {
+        setInstallments([]);
       }
     }
     loadDue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loanId]);
+
+  // Update input boxes whenever selected installment or payment option changes
+  useEffect(() => {
+    const current = installments.find((i) => i.installment_number === selectedInstallmentNum);
+    if (!current) return;
+
+    if (paymentOption === "interest_only") {
+      setPrincipalPortion("0");
+      const totalInterest =
+        Number(current.interest_due || 0) +
+        (current.is_final_installment ? Number(current.extra_interest_due || 0) + Number(current.penalty_due || 0) : 0);
+      setInterestPortion(String(totalInterest));
+    } else {
+      setPrincipalPortion(String(current.principal_due || 0));
+      const totalInterestAndPenalties =
+        Number(current.interest_due || 0) +
+        (current.is_final_installment ? Number(current.extra_interest_due || 0) + Number(current.penalty_due || 0) : 0);
+      setInterestPortion(String(totalInterestAndPenalties));
+    }
+  }, [selectedInstallmentNum, paymentOption, installments]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -186,7 +209,8 @@ export default function PayLoanPage() {
   const currentPrincipal = Number(principalPortion) || 0;
   const currentInterest = Number(interestPortion) || 0;
   const totalPayment = currentPrincipal + currentInterest;
-  const statusInfo = due ? STATUS_CONFIG[due.loan_status] : null;
+  const currentSelectedRow = installments.find((i) => i.installment_number === selectedInstallmentNum);
+  const statusInfo = currentSelectedRow ? STATUS_CONFIG[currentSelectedRow.loan_status] : null;
 
   return (
     <div
@@ -210,7 +234,6 @@ export default function PayLoanPage() {
           boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.12)",
         }}
       >
-        {/* Navigation Link */}
         <Link
           href="/dashboard"
           style={{
@@ -227,17 +250,15 @@ export default function PayLoanPage() {
           ← Back to Dashboard
         </Link>
 
-        {/* Title */}
         <div style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>
             Pay Loan
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Amounts due are calculated automatically including penalties. Submitted payments undergo admin review.
+            Choose an installment month and payment type. Penalties apply only if the final due date is exceeded.
           </p>
         </div>
 
-        {/* Error Alert */}
         {error && (
           <div
             style={{
@@ -255,19 +276,14 @@ export default function PayLoanPage() {
         )}
 
         {loadingLoans ? (
-          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
-            Loading your loans...
-          </p>
+          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>Loading your loans...</p>
         ) : loans.length === 0 ? (
-          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
-            You don't have any active loans to pay.
-          </p>
+          <p style={{ color: "var(--text-sub)", fontSize: 14 }}>You don't have any active loans to pay.</p>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
             {/* Loan Select */}
             <div>
               <label
-                htmlFor="loan"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -279,7 +295,6 @@ export default function PayLoanPage() {
                 Select Active Loan
               </label>
               <select
-                id="loan"
                 value={loanId}
                 onChange={(e) => setLoanId(e.target.value)}
                 required
@@ -302,8 +317,96 @@ export default function PayLoanPage() {
               </select>
             </div>
 
-            {/* Loan Due Summary Breakdown Card */}
-            {due && due.loan_status !== "completed" && (
+            {/* Installment Month Select */}
+            {installments.length > 0 && (
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-sub)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Select Installment Month to Pay
+                </label>
+                <select
+                  value={selectedInstallmentNum}
+                  onChange={(e) => setSelectedInstallmentNum(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-card-hover)",
+                    color: "var(--text-main)",
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                >
+                  {installments.map((inst) => (
+                    <option key={inst.installment_number} value={inst.installment_number}>
+                      Month {inst.installment_number} (Due: {inst.due_date})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Payment Scope Option: Full vs Interest Only */}
+            {currentSelectedRow && (
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-sub)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Payment Option for Month {selectedInstallmentNum}
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOption("full")}
+                    style={{
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: paymentOption === "full" ? "2px solid #3b82f6" : "1px solid var(--border-color)",
+                      background: paymentOption === "full" ? "rgba(59, 130, 246, 0.1)" : "var(--bg-card-hover)",
+                      color: "var(--text-main)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Full Amount
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOption("interest_only")}
+                    style={{
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: paymentOption === "interest_only" ? "2px solid #3b82f6" : "1px solid var(--border-color)",
+                      background: paymentOption === "interest_only" ? "rgba(59, 130, 246, 0.1)" : "var(--bg-card-hover)",
+                      color: "var(--text-main)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Interest Only
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Breakdown Card */}
+            {currentSelectedRow && (
               <div
                 style={{
                   background: "var(--bg-card-hover)",
@@ -327,78 +430,41 @@ export default function PayLoanPage() {
                       textTransform: "uppercase",
                     }}
                   >
-                    {statusInfo?.label ?? due.loan_status}
+                    {statusInfo?.label ?? currentSelectedRow.loan_status}
                   </span>
-                  {due.due_date && (
-                    <span style={{ color: "var(--text-sub)", fontSize: 12 }}>
-                      Due Date: {due.due_date}
-                      {due.days_late > 0 && (
-                        <strong style={{ color: "#ef4444", marginLeft: 6 }}>
-                          ({due.days_late}d late)
-                        </strong>
-                      )}
-                    </span>
-                  )}
+                  <span style={{ color: "var(--text-sub)", fontSize: 12 }}>
+                    Due: {currentSelectedRow.due_date}
+                  </span>
                 </div>
 
                 <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-sub)" }}>Principal Due:</span>
-                    <span>{fmt(due.principal_due)}</span>
+                    <span style={{ color: "var(--text-sub)" }}>Principal Portion:</span>
+                    <span>{fmt(currentSelectedRow.principal_due)}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-sub)" }}>Interest Due:</span>
-                    <span>{fmt(due.interest_due)}</span>
+                    <span style={{ color: "var(--text-sub)" }}>Monthly Interest:</span>
+                    <span>{fmt(currentSelectedRow.interest_due)}</span>
                   </div>
-                  {due.extra_interest_due > 0 && (
+                  {currentSelectedRow.is_final_installment && currentSelectedRow.extra_interest_due > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "var(--text-sub)" }}>Extra Interest:</span>
-                      <span>{fmt(due.extra_interest_due)}</span>
+                      <span style={{ color: "var(--text-sub)" }}>Extra Month Interest:</span>
+                      <span>{fmt(currentSelectedRow.extra_interest_due)}</span>
                     </div>
                   )}
-                  {due.penalty_due > 0 && (
+                  {currentSelectedRow.is_final_installment && currentSelectedRow.penalty_due > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "#ef4444" }}>Late Penalty:</span>
-                      <span style={{ color: "#ef4444" }}>{fmt(due.penalty_due)}</span>
+                      <span style={{ color: "#ef4444" }}>Interest Penalty (10%):</span>
+                      <span style={{ color: "#ef4444" }}>{fmt(currentSelectedRow.penalty_due)}</span>
                     </div>
                   )}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      borderTop: "1px dashed var(--border-color)",
-                      paddingTop: 6,
-                      marginTop: 2,
-                      fontWeight: 700,
-                    }}
-                  >
-                    <span>Total Calculated Due:</span>
-                    <span style={{ color: "#10b981" }}>{fmt(due.total_due)}</span>
-                  </div>
                 </div>
               </div>
             )}
 
-            {due && due.loan_status === "completed" && (
-              <div
-                style={{
-                  background: "rgba(16, 185, 129, 0.1)",
-                  border: "1px solid rgba(16, 185, 129, 0.3)",
-                  color: "#10b981",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                🎉 This loan is fully paid.
-              </div>
-            )}
-
-            {/* Principal Portion */}
+            {/* Editable Input Fields */}
             <div>
               <label
-                htmlFor="principalPortion"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -410,13 +476,11 @@ export default function PayLoanPage() {
                 Principal Amount (₱)
               </label>
               <input
-                id="principalPortion"
                 type="number"
                 min="0"
                 step="0.01"
                 value={principalPortion}
                 onChange={(e) => setPrincipalPortion(e.target.value)}
-                placeholder="0.00"
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -430,10 +494,8 @@ export default function PayLoanPage() {
               />
             </div>
 
-            {/* Interest Portion */}
             <div>
               <label
-                htmlFor="interestPortion"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -445,13 +507,11 @@ export default function PayLoanPage() {
                 Interest & Penalty Amount (₱)
               </label>
               <input
-                id="interestPortion"
                 type="number"
                 min="0"
                 step="0.01"
                 value={interestPortion}
                 onChange={(e) => setInterestPortion(e.target.value)}
-                placeholder="0.00"
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -465,7 +525,6 @@ export default function PayLoanPage() {
               />
             </div>
 
-            {/* Total Payment Preview */}
             {totalPayment > 0 && (
               <div
                 style={{
@@ -486,10 +545,8 @@ export default function PayLoanPage() {
               </div>
             )}
 
-            {/* Pay Date */}
             <div>
               <label
-                htmlFor="payDate"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -501,7 +558,6 @@ export default function PayLoanPage() {
                 Payment Date
               </label>
               <input
-                id="payDate"
                 type="date"
                 required
                 value={payDate}
@@ -519,7 +575,6 @@ export default function PayLoanPage() {
               />
             </div>
 
-            {/* Signature Area */}
             <div>
               <label
                 style={{
@@ -544,11 +599,9 @@ export default function PayLoanPage() {
               </div>
             </div>
 
-            {/* Submit Action */}
             <button
               type="submit"
-              disabled={loading || (due?.loan_status === "completed")}
-              className="btn-approve-sm"
+              disabled={loading}
               style={{
                 width: "100%",
                 padding: "12px 0",
@@ -556,8 +609,7 @@ export default function PayLoanPage() {
                 fontWeight: 600,
                 marginTop: 4,
                 height: 44,
-                opacity: due?.loan_status === "completed" ? 0.5 : 1,
-                cursor: due?.loan_status === "completed" ? "not-allowed" : "pointer",
+                cursor: "pointer",
               }}
             >
               {loading ? "Submitting Payment..." : "Submit Payment for Approval"}
