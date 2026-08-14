@@ -70,33 +70,57 @@ export default async function DashboardPage() {
   let referralBonusEarned = 0;
 
   if (accountIds.length > 0) {
-    const [{ data: contributions }, { data: shares }, { data: loans }] =
-      await Promise.all([
-        supabase
-          .from("contributions")
-          .select("amount")
-          .in("account_id", accountIds)
-          .eq("status", "approved"),
-        supabase
-          .from("member_interest_shares")
-          .select("amount")
-          .in("account_id", accountIds),
-        supabase
-          .from("loans")
-          .select("id, principal_amount")
-          .in("account_id", accountIds)
-          .in("status", ["approved", "active", "disbursed", "Approved", "Active"]),
-      ]);
+    // 1. Fetch contributions, user's loans, and total pool metrics (approved interest + penalties / total accounts)
+    const [
+      { data: contributions },
+      { data: loans },
+      { data: allApprovedPayments },
+      { data: allPenalties },
+      { count: totalSystemAccounts },
+    ] = await Promise.all([
+      supabase
+        .from("contributions")
+        .select("amount")
+        .in("account_id", accountIds)
+        .eq("status", "approved"),
+      supabase
+        .from("loans")
+        .select("id, principal_amount")
+        .in("account_id", accountIds)
+        .in("status", ["approved", "active", "disbursed", "Approved", "Active"]),
+      supabase
+        .from("loan_payments")
+        .select("interest_portion")
+        .eq("status", "approved"),
+      supabase
+        .from("penalties")
+        .select("amount"),
+      supabase
+        .from("coop_accounts")
+        .select("*", { count: "exact", head: true }),
+    ]);
 
     totalContribution = (contributions ?? []).reduce(
       (sum, c) => sum + Number(c.amount || 0),
       0
     );
 
-    interestEarned = (shares ?? []).reduce(
-      (sum, s) => sum + Number(s.amount || 0),
+    // Calculate dynamic pool share: (Sum of approved interest portions + Sum of penalties) / Total coop accounts
+    const totalApprovedInterest = (allApprovedPayments ?? []).reduce(
+      (sum, p) => sum + Number(p.interest_portion || 0),
       0
     );
+
+    const totalPenaltiesSum = (allPenalties ?? []).reduce(
+      (sum, pen) => sum + Number(pen.amount || 0),
+      0
+    );
+
+    const accountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
+    const poolSharePerAccount = (totalApprovedInterest + totalPenaltiesSum) / accountCount;
+
+    // Multiply user's personal account count by the pool share per account to get total interest earned
+    interestEarned = poolSharePerAccount * accountIds.length;
 
     const activeLoanIds = (loans ?? []).map((l) => l.id);
     let totalPrincipalPaid = 0;
