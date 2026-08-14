@@ -21,8 +21,9 @@ type Row = {
   signature_url: string;
   applied_at: string;
   coop_accounts: {
+    profile_id?: string;
     account_name: string;
-    profiles: { first_name: string | null; last_name: string | null } | null;
+    profiles: { id?: string; first_name: string | null; last_name: string | null } | null;
   } | null;
   referrer: { first_name: string | null; last_name: string | null } | null;
 };
@@ -72,7 +73,7 @@ export default function AdminLoansPage() {
       .select(
         `id, status, borrower_type, borrower_name, borrower_contact,
          principal_amount, term_months, base_interest_rate, referral_fee_rate, signature_url, applied_at,
-         coop_accounts(account_name, profiles(first_name,last_name)),
+         coop_accounts(profile_id, account_name, profiles(id, first_name, last_name)),
          referrer:referred_by(first_name,last_name)`
       )
       .in("status", statusFilter)
@@ -88,9 +89,63 @@ export default function AdminLoansPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // Helper function to send notification upon loan approval
+  async function sendLoanApprovalNotification(userId: string, loanAmountText: string) {
+    if (!userId) return;
+
+    try {
+      const title = "Loan Application Approved";
+      const message = `Your loan application for ${loanAmountText} has been verified and approved.`;
+
+      const { data: notif, error: notifErr } = await supabase
+        .from("notifications")
+        .insert({
+          title,
+          message,
+          type: "info",
+          target_type: "selected",
+        })
+        .select()
+        .single();
+
+      if (notifErr || !notif) {
+        console.error("Failed to create notification record:", notifErr?.message);
+        return;
+      }
+
+      const { error: userNotifErr } = await supabase
+        .from("user_notifications")
+        .insert({
+          notification_id: notif.id,
+          user_id: userId,
+          is_read: false,
+        });
+
+      if (userNotifErr) {
+        console.error("Failed to link user notification:", userNotifErr.message);
+      }
+
+      await fetch("/api/send-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          message,
+          targetType: "selected",
+          recipientIds: [userId],
+        }),
+      });
+    } catch (err) {
+      console.error("Error triggering loan approval notifications:", err);
+    }
+  }
+
   async function act(id: string, status: "approved" | "rejected" | "completed") {
     setActingId(id);
     setError(null);
+
+    const targetRow = rows.find((r) => r.id === id);
+
     const { error } = await supabase
       .from("loans")
       .update({ status })
@@ -99,6 +154,13 @@ export default function AdminLoansPage() {
     if (error) {
       setError(error.message);
     } else {
+      // If approved, trigger notification for member borrowers
+      if (status === "approved" && targetRow && targetRow.borrower_type === "member") {
+        const userId = targetRow.coop_accounts?.profile_id || targetRow.coop_accounts?.profiles?.id;
+        if (userId) {
+          await sendLoanApprovalNotification(userId, fmt(targetRow.principal_amount));
+        }
+      }
       await load(activeTab);
     }
     setActingId(null);
@@ -415,6 +477,7 @@ export default function AdminLoansPage() {
                 marginBottom: 16,
               }}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={activeSignature}
                 alt="Signature"
@@ -661,6 +724,7 @@ function ContractView({ loan, copyType }: { loan: Row; copyType: string }) {
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: "30px" }}>
         <div style={{ width: "45%", textAlign: "center" }}>
           {loan.signature_url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={loan.signature_url}
               alt="Borrower Signature"
