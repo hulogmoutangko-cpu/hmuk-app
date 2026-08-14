@@ -12,8 +12,10 @@ function fmt(amount: number) {
   });
 }
 
-// Helper to count total semi-monthly periods (twice a month) between start date and now
-function getExpectedSemiMonthlyPeriods(startDateStr: string): number {
+// Helper to count exact semi-monthly periods based on your business logic:
+// - If today is < 15, we only count up to the end of last month.
+// - If today is >= 15, we count up to the 15th of this month (half month).
+function getExactExpectedSemiMonthlyPeriods(startDateStr: string): number {
   const start = new Date(startDateStr);
   const now = new Date();
   
@@ -22,12 +24,21 @@ function getExpectedSemiMonthlyPeriods(startDateStr: string): number {
   let periods = 0;
   let curr = new Date(start.getFullYear(), start.getMonth(), 1);
 
-  while (curr <= now) {
-    const p1End = new Date(curr.getFullYear(), curr.getMonth(), 15);
-    if (p1End <= now && curr <= now) periods++;
+  const currentDay = now.getDate();
+  const currentMonthLimit = new Date(now.getFullYear(), now.getMonth(), currentDay < 15 ? 1 : 16);
 
+  while (curr <= now) {
+    // Period 1: 1st to 15th of the month
+    const p1End = new Date(curr.getFullYear(), curr.getMonth(), 15);
+    if (p1End <= currentMonthLimit && curr <= now) {
+      periods++;
+    }
+
+    // Period 2: 16th to end of the month
     const p2Start = new Date(curr.getFullYear(), curr.getMonth(), 16);
-    if (p2Start <= now) periods++;
+    if (p2Start <= currentMonthLimit) {
+      periods++;
+    }
 
     curr.setMonth(curr.getMonth() + 1);
   }
@@ -65,7 +76,6 @@ export default async function AdminPage() {
     { data: approvedPayments },
     { data: interestPayments },
     { data: penaltiesList },
-    { data: allProfiles },
     { data: allAccounts },
     { data: allContributions },
     { data: settingsRows },
@@ -96,17 +106,14 @@ export default async function AdminPage() {
       .from("loan_interest_payments")
       .select("interest_amount, pool_amount"),
     supabase.from("penalties").select("amount"),
-    supabase.from("profiles").select("id, role"),
-    supabase.from("coop_accounts").select("id, profile_id"),
+    supabase.from("coop_accounts").select("id"),
     supabase
       .from("contributions")
-      .select("account_id, amount, status, pay_date, created_at")
+      .select("account_id, amount, status")
       .in("status", ["approved", "pending"]),
-    // Fetch settings from your existing system_settings table
     supabase.from("system_settings").select("key, value").in("key", ["coop_start_date", "monthly_contribution_amount"]),
   ]);
 
-  // Convert settings rows array into an easy object map
   const settingsMap: Record<string, string> = {};
   (settingsRows ?? []).forEach((row) => {
     if (row.key && row.value) {
@@ -114,7 +121,7 @@ export default async function AdminPage() {
     }
   });
 
-  // 1. Total Approved Contributions
+  // 1. Total Approved/Posted Contributions
   const totalContributions = (approvedContributions ?? []).reduce(
     (sum, c) => sum + Number(c.amount || 0),
     0
@@ -154,14 +161,19 @@ export default async function AdminPage() {
     0
   );
 
-  // 6. Calculate Unpaid Members based on System Settings
+  // 6. Settings & Projected Contributions Calculation
   const coopStartDate = settingsMap["coop_start_date"] || "2026-01-01";
   const monthlyAmount = Number(settingsMap["monthly_contribution_amount"] || 1000);
-  const semiMonthlyTargetAmount = monthlyAmount / 2; // Split payment twice a month
+  const semiMonthlyTargetAmount = monthlyAmount / 2; // Twice a month target per account
 
-  const totalExpectedPeriods = getExpectedSemiMonthlyPeriods(coopStartDate);
-  const totalExpectedAmountPerMember = totalExpectedPeriods * semiMonthlyTargetAmount;
+  const totalAccountsCount = (allAccounts ?? []).length;
+  const totalExpectedPeriods = getExactExpectedSemiMonthlyPeriods(coopStartDate);
+  
+  // Projected Total = (Monthly / 2) * Total Accounts * Expected Periods
+  const totalProjectedContributions = totalExpectedPeriods * semiMonthlyTargetAmount * totalAccountsCount;
+  const totalExpectedAmountPerAccount = totalExpectedPeriods * semiMonthlyTargetAmount;
 
+  // Track Unpaid / Behind Accounts
   const accountPaidTotals: Record<string, number> = {};
   (allContributions ?? []).forEach((c) => {
     if (c.account_id) {
@@ -170,21 +182,9 @@ export default async function AdminPage() {
     }
   });
 
-  const profileToAccounts: Record<string, string[]> = {};
-  (allAccounts ?? []).forEach((acc) => {
-    if (!profileToAccounts[acc.profile_id]) {
-      profileToAccounts[acc.profile_id] = [];
-    }
-    profileToAccounts[acc.profile_id].push(acc.id);
-  });
-
-  const unpaidMembersCount = (allProfiles ?? []).filter((p) => {
-    if (p.role === "admin") return false;
-    const userAccs = profileToAccounts[p.id] || [];
-    if (userAccs.length === 0) return true;
-
-    const userTotalPaid = userAccs.reduce((sum, accId) => sum + (accountPaidTotals[accId] || 0), 0);
-    return userTotalPaid < totalExpectedAmountPerMember;
+  const unpaidAccountsCount = (allAccounts ?? []).filter((acc) => {
+    const totalPaidForAccount = accountPaidTotals[acc.id] || 0;
+    return totalPaidForAccount < totalExpectedAmountPerAccount;
   }).length;
 
   return (
@@ -198,7 +198,7 @@ export default async function AdminPage() {
             <span className="badge admin">ADMIN DASHBOARD</span>
             <h1>Welcome back, {profile?.first_name ?? "Admin"}</h1>
             <p style={{ margin: "4px 0 0", color: "var(--text-sub)", fontSize: 13.5 }}>
-              {user.email} • Co-op Start: {coopStartDate} ({fmt(semiMonthlyTargetAmount)} / semi-monthly)
+              {user.email} • Co-op Start: {coopStartDate} ({fmt(semiMonthlyTargetAmount)} / semi-monthly per account)
             </p>
           </div>
           <div style={{ width: 120 }}>
@@ -280,12 +280,12 @@ export default async function AdminPage() {
             <div className="value">{totalMembers ?? 0}</div>
           </div>
           <div className="stat-card">
-            <div className="label">Unpaid / Behind Members</div>
+            <div className="label">Unpaid / Behind Accounts</div>
             <div
               className="value"
-              style={{ color: unpaidMembersCount > 0 ? "#ef4444" : "inherit" }}
+              style={{ color: unpaidAccountsCount > 0 ? "#ef4444" : "inherit" }}
             >
-              {unpaidMembersCount}
+              {unpaidAccountsCount}
             </div>
           </div>
         </div>
@@ -294,8 +294,13 @@ export default async function AdminPage() {
         <div className="section-title">Financial Overview</div>
         <div className="grid-cards">
           <div className="stat-card">
-            <div className="label">Total Contributions</div>
-            <div className="value">{fmt(totalContributions)}</div>
+            <div className="label">Posted vs Projected Contributions</div>
+            <div className="value" style={{ fontSize: "1.25rem" }}>
+              {fmt(totalContributions)}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 4 }}>
+              Projected Target: {fmt(totalProjectedContributions)}
+            </div>
           </div>
           <div className="stat-card">
             <div className="label">Total Interest Earned</div>
