@@ -8,12 +8,14 @@ import AdminNav from "../admin-nav";
 type SingleOrArray<T> = T | T[];
 
 type SupabaseProfile = {
+  id?: string;
   first_name: string | null;
   last_name: string | null;
 };
 
 type SupabaseCoopAccount = {
   account_name: string;
+  user_id?: string;
   profiles: SingleOrArray<SupabaseProfile> | null;
 };
 
@@ -58,8 +60,9 @@ function getMemberDetails(row: Row) {
 
   const initial = (profile?.first_name?.[0] || "M").toUpperCase();
   const accountName = account?.account_name ?? "—";
+  const userId = account?.user_id ?? profile?.id;
 
-  return { memberName, initial, accountName };
+  return { memberName, initial, accountName, userId };
 }
 
 export default function AdminContributionsPage() {
@@ -87,7 +90,7 @@ export default function AdminContributionsPage() {
     const { data, error } = await supabase
       .from("contributions")
       .select(
-        "id, amount, pay_date, signature_url, status, coop_accounts(account_name, profiles(first_name,last_name))"
+        "id, amount, pay_date, signature_url, status, coop_accounts(account_name, user_id, profiles(id, first_name, last_name))"
       )
       .eq("status", activeTab)
       .order("created_at", { ascending: false });
@@ -106,7 +109,6 @@ export default function AdminContributionsPage() {
   // Combined Filter logic (Search query + Date range)
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
-      // Search filter
       const { memberName, accountName } = getMemberDetails(r);
       const query = searchQuery.toLowerCase().trim();
       const nameMatch = memberName.toLowerCase().includes(query);
@@ -114,7 +116,6 @@ export default function AdminContributionsPage() {
       const amountMatch = (r.amount ?? 0).toString().includes(query);
       const matchesSearch = !query || nameMatch || accountMatch || amountMatch;
 
-      // Date range filter
       let matchesDate = true;
       if (r.pay_date) {
         const payDate = new Date(r.pay_date).getTime();
@@ -123,7 +124,6 @@ export default function AdminContributionsPage() {
           if (payDate < start) matchesDate = false;
         }
         if (endDate) {
-          // Set to end of the day for inclusive boundary
           const end = new Date(endDate);
           end.setHours(23, 59, 59, 999);
           if (payDate > end.getTime()) matchesDate = false;
@@ -135,6 +135,59 @@ export default function AdminContributionsPage() {
       return matchesSearch && matchesDate;
     });
   }, [rows, searchQuery, startDate, endDate]);
+
+  // Helper function to send notification to targeted users upon approval
+  async function sendApprovalNotification(targetUserIds: string[], amountText: string) {
+    if (targetUserIds.length === 0) return;
+
+    try {
+      const title = "Contribution Approved";
+      const message = `Your contribution of ${amountText} has been verified and approved by the administrator.`;
+
+      const { data: notif, error: notifErr } = await supabase
+        .from("notifications")
+        .insert({
+          title,
+          message,
+          type: "info",
+          target_type: "selected",
+        })
+        .select()
+        .single();
+
+      if (notifErr || !notif) {
+        console.error("Failed to create notification record:", notifErr?.message);
+        return;
+      }
+
+      const userNotifs = targetUserIds.map((userId) => ({
+        notification_id: notif.id,
+        user_id: userId,
+        is_read: false,
+      }));
+
+      const { error: userNotifErr } = await supabase
+        .from("user_notifications")
+        .insert(userNotifs);
+
+      if (userNotifErr) {
+        console.error("Failed to link user notifications:", userNotifErr.message);
+      }
+
+      await fetch("/api/send-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          message,
+          targetType: "selected",
+          recipientIds: targetUserIds,
+        }),
+      });
+    } catch (err) {
+      console.error("Error triggering approval notifications:", err);
+    }
+  }
 
   // Bulk Selection Handlers
   function toggleSelectAll() {
@@ -155,6 +208,9 @@ export default function AdminContributionsPage() {
   async function act(id: string, status: "approved" | "rejected") {
     setActingId(id);
     setError(null);
+
+    const targetRow = rows.find((r) => r.id === id);
+
     const { error } = await supabase
       .from("contributions")
       .update({ status })
@@ -163,6 +219,12 @@ export default function AdminContributionsPage() {
     if (error) {
       setError(error.message);
     } else {
+      if (status === "approved" && targetRow) {
+        const { userId } = getMemberDetails(targetRow);
+        if (userId) {
+          await sendApprovalNotification([userId], fmt(targetRow.amount));
+        }
+      }
       await load();
     }
     setActingId(null);
@@ -178,6 +240,8 @@ export default function AdminContributionsPage() {
     setBulkProcessing(true);
     setError(null);
 
+    const targetRows = rows.filter((r) => selectedIds.includes(r.id));
+
     const { error } = await supabase
       .from("contributions")
       .update({ status })
@@ -186,6 +250,21 @@ export default function AdminContributionsPage() {
     if (error) {
       setError(error.message);
     } else {
+      if (status === "approved") {
+        const userIds = targetRows
+          .map((r) => getMemberDetails(r).userId)
+          .filter(Boolean) as string[];
+
+        if (userIds.length > 0) {
+          // Send summary or bulk notifications
+          for (const row of targetRows) {
+            const { userId } = getMemberDetails(row);
+            if (userId) {
+              await sendApprovalNotification([userId], fmt(row.amount));
+            }
+          }
+        }
+      }
       await load();
     }
     setBulkProcessing(false);

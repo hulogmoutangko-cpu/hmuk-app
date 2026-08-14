@@ -56,6 +56,27 @@ const notificationTypes: {
   },
 ];
 
+const presetTemplates = [
+  {
+    label: "Contribution Reminder",
+    type: "warning" as NotificationType,
+    title: "Semi-Monthly Contribution Due",
+    message: "Friendly reminder to settle your co-op contribution for this period to keep your account active and in good standing.",
+  },
+  {
+    label: "Loan Disbursement",
+    type: "info" as NotificationType,
+    title: "Loan Successfully Disbursed",
+    message: "Your loan application has been approved and successfully processed. Please check your co-op account details.",
+  },
+  {
+    label: "System Maintenance",
+    type: "update" as NotificationType,
+    title: "Scheduled System Maintenance",
+    message: "Our platform will undergo brief scheduled maintenance to improve performance. Thank you for your patience.",
+  },
+];
+
 export default function AdminNotificationsPage() {
   const supabase = createClient();
 
@@ -66,8 +87,7 @@ export default function AdminNotificationsPage() {
 
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [type, setType] =
-    useState<NotificationType>("info");
+  const [type, setType] = useState<NotificationType>("info");
 
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<
@@ -78,33 +98,22 @@ export default function AdminNotificationsPage() {
     | null
   >(null);
 
-  const [mobileNavOpen, setMobileNavOpen] =
-    useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     async function fetchProfiles() {
       const { data, error } = await supabase
         .from("profiles")
-        .select(
-          "id, email, first_name, last_name, role"
-        )
+        .select("id, email, first_name, last_name, role")
         .neq("role", "admin")
-        .order("first_name", {
-          ascending: true,
-        });
+        .order("first_name", { ascending: true });
 
       if (error) {
-        console.error(
-          "Error fetching profiles:",
-          error.message
-        );
-
+        console.error("Error fetching profiles:", error.message);
         setStatus({
           type: "error",
-          message:
-            "Unable to load member profiles.",
+          message: "Unable to load member profiles.",
         });
-
         return;
       }
 
@@ -118,42 +127,21 @@ export default function AdminNotificationsPage() {
 
   const filteredProfiles = useMemo(() => {
     const query = search.trim().toLowerCase();
-
     if (!query) return profiles;
 
     return profiles.filter((profile) => {
-      const name =
-        `${profile.first_name ?? ""} ${
-          profile.last_name ?? ""
-        }`.trim();
-
+      const name = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
       return (
         name.toLowerCase().includes(query) ||
-        profile.email
-          .toLowerCase()
-          .includes(query)
+        profile.email.toLowerCase().includes(query)
       );
     });
   }, [profiles, search]);
 
-  const selectedProfiles = useMemo(
-    () =>
-      profiles.filter((profile) =>
-        selectedUserIds.includes(profile.id)
-      ),
-    [profiles, selectedUserIds]
-  );
-
-  const selectedType = notificationTypes.find(
-    (item) => item.value === type
-  );
+  const selectedType = notificationTypes.find((item) => item.value === type);
 
   function getDisplayName(profile: Profile) {
-    const name =
-      `${profile.first_name ?? ""} ${
-        profile.last_name ?? ""
-      }`.trim();
-
+    const name = `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim();
     return name || profile.email;
   }
 
@@ -163,222 +151,124 @@ export default function AdminNotificationsPage() {
         ? prev.filter((id) => id !== userId)
         : [...prev, userId]
     );
-
     setStatus(null);
   }
 
   function selectAllFiltered() {
-    const filteredIds = filteredProfiles.map(
-      (profile) => profile.id
-    );
-
-    setSelectedUserIds((prev) =>
-      Array.from(
-        new Set([...prev, ...filteredIds])
-      )
-    );
+    const filteredIds = filteredProfiles.map((profile) => profile.id);
+    setSelectedUserIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
   }
 
   function clearSelection() {
     setSelectedUserIds([]);
   }
 
-  function handleTargetChange(
-    value: TargetType
-  ) {
+  function handleTargetChange(value: TargetType) {
     setTargetType(value);
     setStatus(null);
-
     if (value === "all") {
       setSelectedUserIds([]);
     }
   }
 
-  async function handleSend(
-    e: React.FormEvent
-  ) {
-    e.preventDefault();
+  function applyTemplate(template: typeof presetTemplates[0]) {
+    setTitle(template.title);
+    setMessage(template.message);
+    setType(template.type);
+    setStatus(null);
+  }
 
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault();
     setStatus(null);
 
     const cleanTitle = title.trim();
     const cleanMessage = message.trim();
 
     if (!cleanTitle) {
-      setStatus({
-        type: "error",
-        message:
-          "Please enter a notification title.",
-      });
+      setStatus({ type: "error", message: "Please enter a notification title." });
       return;
     }
 
     if (!cleanMessage) {
-      setStatus({
-        type: "error",
-        message:
-          "Please enter a notification message.",
-      });
+      setStatus({ type: "error", message: "Please enter a notification message." });
       return;
     }
 
-    if (
-      targetType === "selected" &&
-      selectedUserIds.length === 0
-    ) {
-      setStatus({
-        type: "error",
-        message:
-          "Please select at least one recipient.",
-      });
+    if (targetType === "selected" && selectedUserIds.length === 0) {
+      setStatus({ type: "error", message: "Please select at least one recipient." });
       return;
     }
 
     setLoading(true);
 
     try {
-      // --------------------------------------------------
-      // 1. Create notification in Supabase
-      // --------------------------------------------------
-
-      const { data: notif, error: notifErr } =
-        await supabase
-          .from("notifications")
-          .insert({
-            title: cleanTitle,
-            message: cleanMessage,
-            type,
-            target_type: targetType,
-          })
-          .select()
-          .single();
+      const { data: notif, error: notifErr } = await supabase
+        .from("notifications")
+        .insert({
+          title: cleanTitle,
+          message: cleanMessage,
+          type,
+          target_type: targetType,
+        })
+        .select()
+        .single();
 
       if (notifErr || !notif) {
-        throw (
-          notifErr ??
-          new Error(
-            "Failed to create notification."
-          )
-        );
+        throw notifErr ?? new Error("Failed to create notification.");
       }
 
-      // --------------------------------------------------
-      // 2. Determine recipients
-      // --------------------------------------------------
-
       let recipientIds: string[] = [];
-
       if (targetType === "all") {
-        recipientIds = profiles.map(
-          (profile) => profile.id
-        );
+        recipientIds = profiles.map((profile) => profile.id);
       } else {
         recipientIds = selectedUserIds;
       }
 
-      // --------------------------------------------------
-      // 3. Create user_notifications
-      // --------------------------------------------------
-
       if (recipientIds.length > 0) {
-        const userNotifs = recipientIds.map(
-          (userId) => ({
-            notification_id: notif.id,
-            user_id: userId,
-            is_read: false,
-          })
-        );
+        const userNotifs = recipientIds.map((userId) => ({
+          notification_id: notif.id,
+          user_id: userId,
+          is_read: false,
+        }));
 
-        const { error: userNotifErr } =
-          await supabase
-            .from("user_notifications")
-            .insert(userNotifs);
+        const { error: userNotifErr } = await supabase
+          .from("user_notifications")
+          .insert(userNotifs);
 
         if (userNotifErr) {
           throw userNotifErr;
         }
       }
 
-      // --------------------------------------------------
-      // 4. Send OneSignal push
-      // --------------------------------------------------
+      const pushRes = await fetch("/api/send-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: cleanTitle,
+          message: cleanMessage,
+          targetType,
+          recipientIds,
+        }),
+      });
 
-      const pushRes = await fetch(
-        "/api/send-notification",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            title: cleanTitle,
-            message: cleanMessage,
-            targetType,
-            recipientIds,
-          }),
-        }
-      );
-
-      const pushData = await pushRes
-        .json()
-        .catch(() => null);
-
-      console.log(
-        "OneSignal push HTTP status:",
-        pushRes.status
-      );
-
-      console.log(
-        "OneSignal push response:",
-        pushData
-      );
+      const pushData = await pushRes.json().catch(() => null);
 
       if (!pushRes.ok) {
-        console.error(
-          "Push dispatch failed:",
-          JSON.stringify(
-            pushData,
-            null,
-            2
-          )
-        );
-
         setStatus({
           type: "warning",
-          message:
-            "The notification was saved, but the push notification could not be sent.",
+          message: "The notification was saved, but the push notification could not be sent.",
         });
-
         return;
       }
 
-      if (
-        pushData &&
-        typeof pushData.recipients ===
-          "number" &&
-        pushData.recipients === 0
-      ) {
+      if (pushData && typeof pushData.recipients === "number" && pushData.recipients === 0) {
         setStatus({
           type: "warning",
-          message:
-            "The notification was saved, but OneSignal matched 0 push recipients.",
+          message: "The notification was saved, but OneSignal matched 0 push recipients.",
         });
-
         return;
       }
-
-      console.log(
-        "Push dispatched successfully:",
-        JSON.stringify(
-          pushData,
-          null,
-          2
-        )
-      );
-
-      // --------------------------------------------------
-      // 5. Success
-      // --------------------------------------------------
 
       setStatus({
         type: "success",
@@ -386,32 +276,18 @@ export default function AdminNotificationsPage() {
           targetType === "all"
             ? `Notification sent to ${profiles.length} member accounts.`
             : `Notification sent to ${selectedUserIds.length} selected member${
-                selectedUserIds.length === 1
-                  ? ""
-                  : "s"
+                selectedUserIds.length === 1 ? "" : "s"
               }.`,
       });
-
-      // --------------------------------------------------
-      // 6. Reset form
-      // --------------------------------------------------
 
       setTitle("");
       setMessage("");
       setSelectedUserIds([]);
       setSearch("");
     } catch (error) {
-      console.error(
-        "Notification creation error:",
-        error
-      );
-
       setStatus({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to send notification.",
+        message: error instanceof Error ? error.message : "Failed to send notification.",
       });
     } finally {
       setLoading(false);
@@ -427,20 +303,15 @@ export default function AdminNotificationsPage() {
 
         body {
           margin: 0;
-          background: #070b14;
+          background: var(--bg-main, #070b14);
+          color: var(--text-main, #f8fafc);
+          font-family: inherit;
         }
 
         .admin-shell {
           min-height: 100vh;
           display: flex;
-          background:
-            radial-gradient(
-              circle at 80% 0%,
-              rgba(99, 102, 241, 0.08),
-              transparent 30%
-            ),
-            #070b14;
-          color: #f8fafc;
+          background: radial-gradient(circle at 80% 0%, rgba(99, 102, 241, 0.08), transparent 30%), #070b14;
         }
 
         .sidebar {
@@ -500,11 +371,7 @@ export default function AdminNotificationsPage() {
 
         .nav-link.active {
           color: #fff;
-          background: linear-gradient(
-            90deg,
-            rgba(99, 102, 241, 0.2),
-            rgba(99, 102, 241, 0.08)
-          );
+          background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.08));
           border: 1px solid rgba(99, 102, 241, 0.2);
         }
 
@@ -636,6 +503,35 @@ export default function AdminNotificationsPage() {
         .counter {
           color: #475569;
           font-size: 11px;
+        }
+
+        /* Templates Bar */
+        .templates-scroll {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+
+        .template-chip {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: #111827;
+          border: 1px solid #243149;
+          border-radius: 8px;
+          padding: 7px 12px;
+          font-size: 11px;
+          color: #94a3b8;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: 0.15s ease;
+        }
+
+        .template-chip:hover {
+          background: rgba(99, 102, 241, 0.1);
+          border-color: rgba(99, 102, 241, 0.4);
+          color: #f8fafc;
         }
 
         .audience-grid {
@@ -885,24 +781,18 @@ export default function AdminNotificationsPage() {
           height: 44px;
           border: 0;
           border-radius: 9px;
-          background: linear-gradient(
-            135deg,
-            #6366f1,
-            #4f46e5
-          );
+          background: linear-gradient(135deg, #6366f1, #4f46e5);
           color: #fff;
           font-weight: 700;
           font-size: 12px;
           cursor: pointer;
-          box-shadow:
-            0 8px 24px rgba(79, 70, 229, 0.2);
+          box-shadow: 0 8px 24px rgba(79, 70, 229, 0.2);
           transition: 0.15s ease;
         }
 
         .send-button:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow:
-            0 12px 28px rgba(79, 70, 229, 0.3);
+          box-shadow: 0 12px 28px rgba(79, 70, 229, 0.3);
         }
 
         .send-button:disabled {
@@ -1141,150 +1031,109 @@ export default function AdminNotificationsPage() {
       `}</style>
 
       <div className="admin-shell">
-        {/* Mobile overlay */}
         <div
-          className={`mobile-overlay ${
-            mobileNavOpen ? "open" : ""
-          }`}
-          onClick={() =>
-            setMobileNavOpen(false)
-          }
+          className={`mobile-overlay ${mobileNavOpen ? "open" : ""}`}
+          onClick={() => setMobileNavOpen(false)}
         />
 
-        {/* Sidebar */}
-        <aside
-          className={`sidebar ${
-            mobileNavOpen ? "open" : ""
-          }`}
-        >
+        <aside className={`sidebar ${mobileNavOpen ? "open" : ""}`}>
           <div className="brand">
-            <div className="brand-title">
-              HMUK Admin
-            </div>
-            <div className="brand-subtitle">
-              Management Console
-            </div>
+            <div className="brand-title">HMUK Admin</div>
+            <div className="brand-subtitle">Management Console</div>
           </div>
 
           <nav className="nav">
             {navItems.map((item) => {
-              const active =
-                item.href ===
-                "/admin/notifications";
-
+              const active = item.href === "/admin/notifications";
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`nav-link ${
-                    active ? "active" : ""
-                  }`}
-                  onClick={() =>
-                    setMobileNavOpen(false)
-                  }
+                  className={`nav-link ${active ? "active" : ""}`}
+                  onClick={() => setMobileNavOpen(false)}
                 >
-                  <span className="nav-icon">
-                    {item.icon}
-                  </span>
-
+                  <span className="nav-icon">{item.icon}</span>
                   <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
 
-          <Link
-            href="/admin"
-            className="back-dashboard"
-          >
+          <Link href="/admin" className="back-dashboard">
             <span>←</span>
             Back to Dashboard
           </Link>
         </aside>
 
         <main className="main">
-          {/* Mobile header */}
           <div className="mobile-header">
             <button
               className="mobile-menu"
               type="button"
-              onClick={() =>
-                setMobileNavOpen(true)
-              }
+              onClick={() => setMobileNavOpen(true)}
               aria-label="Open admin navigation"
             >
               ☰
             </button>
-
-            <strong
-              style={{
-                fontSize: 14,
-                letterSpacing: "-0.02em",
-              }}
-            >
+            <strong style={{ fontSize: 14, letterSpacing: "-0.02em" }}>
               HMUK Admin
             </strong>
           </div>
 
           <div className="content">
-            {/* Header */}
             <div className="page-header">
               <div>
-                <div className="eyebrow">
-                  Administration
-                </div>
-
-                <h1 className="page-title">
-                  Send Notification
-                </h1>
-
+                <div className="eyebrow">Administration</div>
+                <h1 className="page-title">Send Notification</h1>
                 <p className="page-description">
-                  Send announcements and important
-                  updates directly to member accounts.
+                  Send announcements and important updates directly to member accounts.
                 </p>
               </div>
             </div>
 
-            {/* Status */}
             {status && (
-              <div
-                className={`status ${status.type}`}
-                role="status"
-              >
+              <div className={`status ${status.type}`} role="status">
                 <strong>
-                  {status.type === "success"
-                    ? "✓"
-                    : status.type === "warning"
-                    ? "!"
-                    : "×"}
+                  {status.type === "success" ? "✓" : status.type === "warning" ? "!" : "×"}
                 </strong>
-
                 <span>{status.message}</span>
               </div>
             )}
 
             <form onSubmit={handleSend}>
               <div className="workspace">
-                {/* Composer */}
                 <section className="card composer">
                   <div className="card-header">
-                    <h2 className="card-title">
-                      Notification Composer
-                    </h2>
-
+                    <h2 className="card-title">Notification Composer</h2>
                     <p className="card-description">
-                      Configure the audience and message
-                      you want to send.
+                      Configure the audience and message you want to send.
                     </p>
+                  </div>
+
+                  {/* Pre-message Templates Section */}
+                  <div className="section">
+                    <div className="label-row">
+                      <label className="label">Quick Templates</label>
+                      <span className="counter">Click to auto-fill</span>
+                    </div>
+                    <div className="templates-scroll">
+                      {presetTemplates.map((template, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          className="template-chip"
+                          onClick={() => applyTemplate(template)}
+                        >
+                          <span>✦</span> {template.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Audience */}
                   <div className="section">
                     <div className="label-row">
-                      <label className="label">
-                        Audience
-                      </label>
-
+                      <label className="label">Audience</label>
                       <span className="counter">
                         {targetType === "all"
                           ? `${profiles.length} members`
@@ -1296,44 +1145,26 @@ export default function AdminNotificationsPage() {
                       <button
                         type="button"
                         className={`audience-option ${
-                          targetType === "all"
-                            ? "active"
-                            : ""
+                          targetType === "all" ? "active" : ""
                         }`}
-                        onClick={() =>
-                          handleTargetChange("all")
-                        }
+                        onClick={() => handleTargetChange("all")}
                       >
-                        <div className="audience-title">
-                          All Members
-                        </div>
-
+                        <div className="audience-title">All Members</div>
                         <div className="audience-description">
-                          Send to all registered member
-                          subscriptions.
+                          Send to all registered member subscriptions.
                         </div>
                       </button>
 
                       <button
                         type="button"
                         className={`audience-option ${
-                          targetType === "selected"
-                            ? "active"
-                            : ""
+                          targetType === "selected" ? "active" : ""
                         }`}
-                        onClick={() =>
-                          handleTargetChange(
-                            "selected"
-                          )
-                        }
+                        onClick={() => handleTargetChange("selected")}
                       >
-                        <div className="audience-title">
-                          Selected Members
-                        </div>
-
+                        <div className="audience-title">Selected Members</div>
                         <div className="audience-description">
-                          Choose exactly which members
-                          should receive it.
+                          Choose exactly which members should receive it.
                         </div>
                       </button>
                     </div>
@@ -1343,13 +1174,8 @@ export default function AdminNotificationsPage() {
                   {targetType === "selected" && (
                     <div className="section">
                       <div className="label-row">
-                        <label className="label">
-                          Recipients
-                        </label>
-
-                        <span className="counter">
-                          {selectedUserIds.length} selected
-                        </span>
+                        <label className="label">Recipients</label>
+                        <span className="counter">{selectedUserIds.length} selected</span>
                       </div>
 
                       <div className="recipient-box">
@@ -1358,115 +1184,62 @@ export default function AdminNotificationsPage() {
                             className="search"
                             placeholder="Search members..."
                             value={search}
-                            onChange={(e) =>
-                              setSearch(
-                                e.target.value
-                              )
-                            }
+                            onChange={(e) => setSearch(e.target.value)}
                           />
-
                           <button
                             type="button"
                             className="small-button"
-                            onClick={
-                              selectAllFiltered
-                            }
+                            onClick={selectAllFiltered}
                           >
                             Select all
                           </button>
-
                           <button
                             type="button"
                             className="small-button"
-                            onClick={
-                              clearSelection
-                            }
+                            onClick={clearSelection}
                           >
                             Clear
                           </button>
                         </div>
 
                         <div className="recipient-list">
-                          {filteredProfiles.length ===
-                          0 ? (
-                            <div className="empty">
-                              No members found.
-                            </div>
+                          {filteredProfiles.length === 0 ? (
+                            <div className="empty">No members found.</div>
                           ) : (
-                            filteredProfiles.map(
-                              (profile) => {
-                                const selected =
-                                  selectedUserIds.includes(
-                                    profile.id
-                                  );
+                            filteredProfiles.map((profile) => {
+                              const selected = selectedUserIds.includes(profile.id);
+                              const name = getDisplayName(profile);
+                              const initials = name
+                                .split(" ")
+                                .map((part) => part[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase();
 
-                                const name =
-                                  getDisplayName(
-                                    profile
-                                  );
-
-                                const initials =
-                                  name
-                                    .split(" ")
-                                    .map(
-                                      (part) =>
-                                        part[0]
-                                    )
-                                    .join("")
-                                    .slice(0, 2)
-                                    .toUpperCase();
-
-                                return (
-                                  <label
-                                    key={
-                                      profile.id
-                                    }
-                                    className="recipient-row"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="checkbox"
-                                      checked={
-                                        selected
-                                      }
-                                      onChange={() =>
-                                        handleSelectUser(
-                                          profile.id
-                                        )
-                                      }
-                                    />
-
-                                    <div className="avatar">
-                                      {initials}
-                                    </div>
-
-                                    <div className="recipient-info">
-                                      <div className="recipient-name">
-                                        {name}
-                                      </div>
-
-                                      <div className="recipient-email">
-                                        {
-                                          profile.email
-                                        }
-                                      </div>
-                                    </div>
-                                  </label>
-                                );
-                              }
-                            )
+                              return (
+                                <label key={profile.id} className="recipient-row">
+                                  <input
+                                    type="checkbox"
+                                    className="checkbox"
+                                    checked={selected}
+                                    onChange={() => handleSelectUser(profile.id)}
+                                  />
+                                  <div className="avatar">{initials}</div>
+                                  <div className="recipient-info">
+                                    <div className="recipient-name">{name}</div>
+                                    <div className="recipient-email">{profile.email}</div>
+                                  </div>
+                                </label>
+                              );
+                            })
                           )}
                         </div>
 
                         <div className="selection-summary">
-                          {selectedUserIds.length ===
-                          0
+                          {selectedUserIds.length === 0
                             ? "No recipients selected"
                             : `${selectedUserIds.length} member${
-                                selectedUserIds.length ===
-                                1
-                                  ? ""
-                                  : "s"
+                                selectedUserIds.length === 1 ? "" : "s"
                               } will receive this notification`}
                         </div>
                       </div>
@@ -1476,67 +1249,37 @@ export default function AdminNotificationsPage() {
                   {/* Type */}
                   <div className="section">
                     <div className="label-row">
-                      <label className="label">
-                        Notification Type
-                      </label>
+                      <label className="label">Notification Type</label>
                     </div>
 
                     <div className="type-grid">
-                      {notificationTypes.map(
-                        (notificationType) => (
-                          <button
-                            key={
-                              notificationType.value
-                            }
-                            type="button"
-                            className={`type-option ${
-                              type ===
-                              notificationType.value
-                                ? "active"
-                                : ""
-                            }`}
-                            onClick={() =>
-                              setType(
-                                notificationType.value
-                              )
-                            }
-                          >
-                            <div className="type-icon">
-                              {
-                                notificationType.icon
-                              }
-                            </div>
-
-                            <div className="type-name">
-                              {
-                                notificationType.label
-                              }
-                            </div>
-
-                            <div className="type-description">
-                              {
-                                notificationType.description
-                              }
-                            </div>
-                          </button>
-                        )
-                      )}
+                      {notificationTypes.map((notificationType) => (
+                        <button
+                          key={notificationType.value}
+                          type="button"
+                          className={`type-option ${
+                            type === notificationType.value ? "active" : ""
+                          }`}
+                          onClick={() => setType(notificationType.value)}
+                        >
+                          <div className="type-icon">{notificationType.icon}</div>
+                          <div className="type-name">{notificationType.label}</div>
+                          <div className="type-description">
+                            {notificationType.description}
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
 
                   {/* Title */}
                   <div className="section">
                     <div className="label-row">
-                      <label
-                        htmlFor="notification-title"
-                        className="label"
-                      >
+                      <label htmlFor="notification-title" className="label">
                         Title
                       </label>
-
                       <span className="counter">
-                        {title.length}/
-                        {MAX_TITLE_LENGTH}
+                        {title.length}/{MAX_TITLE_LENGTH}
                       </span>
                     </div>
 
@@ -1545,30 +1288,21 @@ export default function AdminNotificationsPage() {
                       className="input"
                       type="text"
                       required
-                      maxLength={
-                        MAX_TITLE_LENGTH
-                      }
+                      maxLength={MAX_TITLE_LENGTH}
                       placeholder="e.g. Scheduled Maintenance Update"
                       value={title}
-                      onChange={(e) =>
-                        setTitle(e.target.value)
-                      }
+                      onChange={(e) => setTitle(e.target.value)}
                     />
                   </div>
 
                   {/* Message */}
                   <div className="section">
                     <div className="label-row">
-                      <label
-                        htmlFor="notification-message"
-                        className="label"
-                      >
+                      <label htmlFor="notification-message" className="label">
                         Message
                       </label>
-
                       <span className="counter">
-                        {message.length}/
-                        {MAX_MESSAGE_LENGTH}
+                        {message.length}/{MAX_MESSAGE_LENGTH}
                       </span>
                     </div>
 
@@ -1576,14 +1310,10 @@ export default function AdminNotificationsPage() {
                       id="notification-message"
                       className="textarea"
                       required
-                      maxLength={
-                        MAX_MESSAGE_LENGTH
-                      }
+                      maxLength={MAX_MESSAGE_LENGTH}
                       placeholder="Write your notification message..."
                       value={message}
-                      onChange={(e) =>
-                        setMessage(e.target.value)
-                      }
+                      onChange={(e) => setMessage(e.target.value)}
                     />
                   </div>
 
@@ -1593,14 +1323,10 @@ export default function AdminNotificationsPage() {
                       {targetType === "all"
                         ? `This will notify ${profiles.length} member accounts.`
                         : `${selectedUserIds.length} selected recipient${
-                            selectedUserIds.length ===
-                            1
-                              ? ""
-                              : "s"
+                            selectedUserIds.length === 1 ? "" : "s"
                           }.`}
                       <br />
-                      Push delivery will be handled by
-                      OneSignal.
+                      Push delivery will be handled by OneSignal.
                     </div>
 
                     <button
@@ -1608,15 +1334,10 @@ export default function AdminNotificationsPage() {
                       type="submit"
                       disabled={
                         loading ||
-                        (targetType ===
-                          "selected" &&
-                          selectedUserIds.length ===
-                            0)
+                        (targetType === "selected" && selectedUserIds.length === 0)
                       }
                     >
-                      {loading
-                        ? "Sending..."
-                        : "Send Notification →"}
+                      {loading ? "Sending..." : "Send Notification →"}
                     </button>
                   </div>
                 </section>
@@ -1624,16 +1345,8 @@ export default function AdminNotificationsPage() {
                 {/* Preview */}
                 <aside className="card preview-card">
                   <div className="preview-header">
-                    <div className="preview-label">
-                      Live Preview
-                    </div>
-
-                    <h2
-                      className="card-title"
-                      style={{
-                        marginTop: 6,
-                      }}
-                    >
+                    <div className="preview-label">Live Preview</div>
+                    <h2 className="card-title" style={{ marginTop: 6 }}>
                       Push notification
                     </h2>
                   </div>
@@ -1652,33 +1365,23 @@ export default function AdminNotificationsPage() {
                         </div>
 
                         <div className="push-title">
-                          {title.trim() ||
-                            "Your notification title"}
+                          {title.trim() || "Your notification title"}
                         </div>
 
                         <div className="push-message">
-                          {message.trim() ||
-                            "Your notification message will appear here."}
+                          {message.trim() || "Your notification message will appear here."}
                         </div>
                       </div>
                     </div>
 
                     <div className="preview-meta">
                       <div className="meta-row">
-                        <span className="meta-label">
-                          Type
-                        </span>
-
-                        <span className="meta-value">
-                          {selectedType?.label}
-                        </span>
+                        <span className="meta-label">Type</span>
+                        <span className="meta-value">{selectedType?.label}</span>
                       </div>
 
                       <div className="meta-row">
-                        <span className="meta-label">
-                          Audience
-                        </span>
-
+                        <span className="meta-label">Audience</span>
                         <span className="meta-value">
                           {targetType === "all"
                             ? "All Members"
@@ -1687,13 +1390,8 @@ export default function AdminNotificationsPage() {
                       </div>
 
                       <div className="meta-row">
-                        <span className="meta-label">
-                          Delivery
-                        </span>
-
-                        <span className="meta-value">
-                          Push Notification
-                        </span>
+                        <span className="meta-label">Delivery</span>
+                        <span className="meta-value">Push Notification</span>
                       </div>
                     </div>
                   </div>
