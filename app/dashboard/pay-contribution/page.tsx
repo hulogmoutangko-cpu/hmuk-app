@@ -7,6 +7,7 @@ import { createClient } from "@/utils/supabase/client";
 import SignaturePad, { SignaturePadHandle } from "../../signature-pad";
 
 type Account = { id: string; account_name: string };
+type Penalty = { id: string; name: string; amount: number };
 
 export default function PayContributionPage() {
   const router = useRouter();
@@ -14,19 +15,20 @@ export default function PayContributionPage() {
   const sigRef = useRef<SignaturePadHandle>(null);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [latePenaltyInfo, setLatePenaltyInfo] = useState<Penalty | null>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
   
-  // Due date is selectable, but payDate is strictly locked to today
+  // UI ONLY: Due date is selectable for calculation, payDate is locked to today
   const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
   const [payDate] = useState(new Date().toISOString().slice(0, 10));
   
   const [loading, setLoading] = useState(false);
-  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadAccounts() {
+    async function loadData() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -36,18 +38,33 @@ export default function PayContributionPage() {
         return;
       }
 
-      const { data } = await supabase
+      // 1. Fetch Accounts
+      const { data: accData } = await supabase
         .from("coop_accounts")
         .select("id, account_name")
         .eq("profile_id", user.id)
         .order("created_at", { ascending: true });
 
-      const fetchedAccounts = data ?? [];
+      const fetchedAccounts = accData ?? [];
       setAccounts(fetchedAccounts);
       setSelectedAccountIds(fetchedAccounts.map((a) => a.id));
-      setLoadingAccounts(false);
+
+      // 2. Fetch Late Penalty ID (Assuming you have a penalty named "Late Contribution Fee" or similar)
+      // Adjust the .eq("name", "...") to match whatever your actual penalty name is in the database.
+      const { data: penData } = await supabase
+        .from("penalties")
+        .select("id, name, amount")
+        .ilike("name", "%late%") 
+        .limit(1)
+        .single();
+
+      if (penData) {
+        setLatePenaltyInfo(penData);
+      }
+
+      setLoadingData(false);
     }
-    loadAccounts();
+    loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -79,14 +96,15 @@ export default function PayContributionPage() {
     const graceEnd = new Date(tDate);
     graceEnd.setDate(graceEnd.getDate() + 4);
 
-    // If the actual payment date is strictly greater than the grace period end
+    // Check if late
     if (aDate > graceEnd) {
       isLate = true;
     }
   }
 
-  const penaltyPerAccount = isLate ? parsedAmount * 0.10 : 0; // 10% Penalty
-  const totalPerAccount = parsedAmount + penaltyPerAccount;
+  // Calculate 10% penalty for UI display
+  const calculatedPenalty = isLate ? parsedAmount * 0.10 : 0; 
+  const totalPerAccount = parsedAmount + calculatedPenalty;
   const calculatedTotal = totalPerAccount * selectedAccountIds.length;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -103,6 +121,10 @@ export default function PayContributionPage() {
     }
     if (!sigRef.current || sigRef.current.isEmpty()) {
       setError("Please provide your signature to confirm this payment.");
+      return;
+    }
+    if (isLate && !latePenaltyInfo) {
+      setError("Late penalty configuration missing in database. Please contact admin.");
       return;
     }
 
@@ -134,14 +156,15 @@ export default function PayContributionPage() {
         data: { publicUrl },
       } = supabase.storage.from("contribution-signatures").getPublicUrl(path);
 
-      // 2. Prepare batch insert array for all selected accounts
+      // 2. Prepare batch insert array matching the EXACT schema shown in image_339fdb.png
+      // Notice due_date is completely omitted here.
       const recordsToInsert = selectedAccountIds.map((accId) => ({
         account_id: accId,
         amount: parsedAmount,
-        penalty_amount: penaltyPerAccount, // Save the calculated penalty
-        due_date: dueDate,                 // Save intended due date
-        pay_date: payDate,                 // Save actual pay date
+        pay_date: payDate,
         signature_url: publicUrl,
+        penalty_id: isLate ? latePenaltyInfo?.id : null, // Uses the ID from the penalties table
+        status: "pending"
       }));
 
       // 3. Insert records
@@ -181,7 +204,6 @@ export default function PayContributionPage() {
           boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.12)",
         }}
       >
-        {/* Navigation Link */}
         <Link
           href="/dashboard"
           style={{
@@ -198,7 +220,6 @@ export default function PayContributionPage() {
           ← Back to Dashboard
         </Link>
 
-        {/* Title & Subtitle */}
         <div style={{ marginBottom: 20 }}>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 4px" }}>
             Pay Contribution
@@ -208,7 +229,6 @@ export default function PayContributionPage() {
           </p>
         </div>
 
-        {/* Error Notification */}
         {error && (
           <div
             style={{
@@ -225,9 +245,9 @@ export default function PayContributionPage() {
           </div>
         )}
 
-        {loadingAccounts ? (
+        {loadingData ? (
           <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
-            Loading your co-op accounts...
+            Loading data...
           </p>
         ) : accounts.length === 0 ? (
           <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
@@ -242,7 +262,7 @@ export default function PayContributionPage() {
           </p>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
-            {/* Account Selection Checkbox Group */}
+            {/* Account Selection */}
             <div>
               <div
                 style={{
@@ -325,7 +345,7 @@ export default function PayContributionPage() {
               </div>
             </div>
 
-            {/* Amount Per Account */}
+            {/* Amount Input */}
             <div>
               <label
                 htmlFor="amount"
@@ -362,9 +382,8 @@ export default function PayContributionPage() {
               />
             </div>
 
-            {/* Date Selection Grid */}
+            {/* Dates */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              {/* Due Date */}
               <div>
                 <label
                   htmlFor="dueDate"
@@ -398,7 +417,6 @@ export default function PayContributionPage() {
                 />
               </div>
 
-              {/* Pay Date (Locked) */}
               <div>
                 <label
                   htmlFor="payDate"
@@ -424,7 +442,7 @@ export default function PayContributionPage() {
                     padding: "10px 12px",
                     borderRadius: 8,
                     border: "1px solid var(--border-color)",
-                    background: "var(--bg-main)", // Slightly darker/different background to indicate it's locked
+                    background: "var(--bg-main)",
                     color: "var(--text-sub)",
                     fontSize: 14,
                     outline: "none",
@@ -436,7 +454,7 @@ export default function PayContributionPage() {
               </div>
             </div>
 
-            {/* Penalty Warning Card */}
+            {/* Warning Card */}
             {isLate && parsedAmount > 0 && (
               <div
                 style={{
@@ -448,11 +466,11 @@ export default function PayContributionPage() {
                   color: "#d97706",
                 }}
               >
-                <strong>Late Payment Detected:</strong> The payment date exceeds the 4-day grace period. A 10% penalty (₱{penaltyPerAccount.toFixed(2)}) has been applied per account.
+                <strong>Late Payment Detected:</strong> The payment date exceeds the 4-day grace period. A 10% penalty (₱{calculatedPenalty.toFixed(2)}) has been applied per account.
               </div>
             )}
 
-            {/* Total Calculation Card */}
+            {/* Totals */}
             {selectedAccountIds.length > 0 && Number(amount) > 0 && (
               <div
                 style={{
@@ -473,7 +491,7 @@ export default function PayContributionPage() {
                 {isLate && (
                   <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706" }}>
                     <span>Penalty Total (10%):</span>
-                    <span>+ ₱{(penaltyPerAccount * selectedAccountIds.length).toFixed(2)}</span>
+                    <span>+ ₱{(calculatedPenalty * selectedAccountIds.length).toFixed(2)}</span>
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, paddingTop: 8, borderTop: "1px solid rgba(16, 185, 129, 0.2)" }}>
@@ -516,7 +534,6 @@ export default function PayContributionPage() {
               </div>
             </div>
 
-            {/* Submit Action */}
             <button
               type="submit"
               disabled={loading}
