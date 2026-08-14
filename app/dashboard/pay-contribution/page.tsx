@@ -7,7 +7,6 @@ import { createClient } from "@/utils/supabase/client";
 import SignaturePad, { SignaturePadHandle } from "../../signature-pad";
 
 type Account = { id: string; account_name: string };
-type Penalty = { id: string; name: string; amount: number };
 
 export default function PayContributionPage() {
   const router = useRouter();
@@ -15,7 +14,6 @@ export default function PayContributionPage() {
   const sigRef = useRef<SignaturePadHandle>(null);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [latePenaltyInfo, setLatePenaltyInfo] = useState<Penalty | null>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
   
@@ -24,11 +22,11 @@ export default function PayContributionPage() {
   const [payDate] = useState(new Date().toISOString().slice(0, 10));
   
   const [loading, setLoading] = useState(false);
-  const [loadingData, setLoadingData] = useState(true);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadData() {
+    async function loadAccounts() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -38,33 +36,18 @@ export default function PayContributionPage() {
         return;
       }
 
-      // 1. Fetch Accounts
-      const { data: accData } = await supabase
+      const { data } = await supabase
         .from("coop_accounts")
         .select("id, account_name")
         .eq("profile_id", user.id)
         .order("created_at", { ascending: true });
 
-      const fetchedAccounts = accData ?? [];
+      const fetchedAccounts = data ?? [];
       setAccounts(fetchedAccounts);
       setSelectedAccountIds(fetchedAccounts.map((a) => a.id));
-
-      // 2. Fetch Late Penalty ID (Assuming you have a penalty named "Late Contribution Fee" or similar)
-      // Adjust the .eq("name", "...") to match whatever your actual penalty name is in the database.
-      const { data: penData } = await supabase
-        .from("penalties")
-        .select("id, name, amount")
-        .ilike("name", "%late%") 
-        .limit(1)
-        .single();
-
-      if (penData) {
-        setLatePenaltyInfo(penData);
-      }
-
-      setLoadingData(false);
+      setLoadingAccounts(false);
     }
-    loadData();
+    loadAccounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -102,9 +85,8 @@ export default function PayContributionPage() {
     }
   }
 
-  // Calculate 10% penalty for UI display
-  const calculatedPenalty = isLate ? parsedAmount * 0.10 : 0; 
-  const totalPerAccount = parsedAmount + calculatedPenalty;
+  const penaltyPerAccount = isLate ? parsedAmount * 0.10 : 0; // 10% Penalty (e.g., 30 pesos)
+  const totalPerAccount = parsedAmount + penaltyPerAccount;
   const calculatedTotal = totalPerAccount * selectedAccountIds.length;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -121,10 +103,6 @@ export default function PayContributionPage() {
     }
     if (!sigRef.current || sigRef.current.isEmpty()) {
       setError("Please provide your signature to confirm this payment.");
-      return;
-    }
-    if (isLate && !latePenaltyInfo) {
-      setError("Late penalty configuration missing in database. Please contact admin.");
       return;
     }
 
@@ -156,23 +134,40 @@ export default function PayContributionPage() {
         data: { publicUrl },
       } = supabase.storage.from("contribution-signatures").getPublicUrl(path);
 
-      // 2. Prepare batch insert array matching the EXACT schema shown in image_339fdb.png
-      // Notice due_date is completely omitted here.
-      const recordsToInsert = selectedAccountIds.map((accId) => ({
-        account_id: accId,
-        amount: parsedAmount,
-        pay_date: payDate,
-        signature_url: publicUrl,
-        penalty_id: isLate ? latePenaltyInfo?.id : null, // Uses the ID from the penalties table
-        status: "pending"
-      }));
+      // 2. Loop through each selected account to create penalty records (if late) and contribution records
+      for (const accId of selectedAccountIds) {
+        let penaltyIdToSave = null;
 
-      // 3. Insert records
-      const { error: insertError } = await supabase
-        .from("contributions")
-        .insert(recordsToInsert);
+        // If late, insert the penalty amount into the penalties table first
+        if (isLate && penaltyPerAccount > 0) {
+          const { data: penaltyData, error: penaltyError } = await supabase
+            .from("penalties")
+            .insert({
+              name: "Late Contribution Penalty",
+              amount: penaltyPerAccount, // Stores the exact penalty amount (e.g., 30)
+              description: `10% late fee for contribution on account ${accId}`
+            })
+            .select("id")
+            .single();
 
-      if (insertError) throw insertError;
+          if (penaltyError) throw penaltyError;
+          penaltyIdToSave = penaltyData.id;
+        }
+
+        // 3. Insert the contribution record linking to the penalty ID
+        const { error: insertError } = await supabase
+          .from("contributions")
+          .insert({
+            account_id: accId,
+            amount: parsedAmount, // Stores the base contribution (e.g., 300)
+            pay_date: payDate,
+            signature_url: publicUrl,
+            penalty_id: penaltyIdToSave, // Links to the newly created penalty row
+            status: "pending"
+          });
+
+        if (insertError) throw insertError;
+      }
 
       router.push("/dashboard");
       router.refresh();
@@ -245,9 +240,9 @@ export default function PayContributionPage() {
           </div>
         )}
 
-        {loadingData ? (
+        {loadingAccounts ? (
           <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
-            Loading data...
+            Loading your co-op accounts...
           </p>
         ) : accounts.length === 0 ? (
           <p style={{ color: "var(--text-sub)", fontSize: 14 }}>
@@ -466,7 +461,7 @@ export default function PayContributionPage() {
                   color: "#d97706",
                 }}
               >
-                <strong>Late Payment Detected:</strong> The payment date exceeds the 4-day grace period. A 10% penalty (₱{calculatedPenalty.toFixed(2)}) has been applied per account.
+                <strong>Late Payment Detected:</strong> The payment date exceeds the 4-day grace period. A 10% penalty (₱{penaltyPerAccount.toFixed(2)}) will be recorded in the penalties table.
               </div>
             )}
 
@@ -491,7 +486,7 @@ export default function PayContributionPage() {
                 {isLate && (
                   <div style={{ display: "flex", justifyContent: "space-between", color: "#d97706" }}>
                     <span>Penalty Total (10%):</span>
-                    <span>+ ₱{(calculatedPenalty * selectedAccountIds.length).toFixed(2)}</span>
+                    <span>+ ₱{(penaltyPerAccount * selectedAccountIds.length).toFixed(2)}</span>
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, paddingTop: 8, borderTop: "1px solid rgba(16, 185, 129, 0.2)" }}>
