@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import Link from "next/link";
 import SignOutButton from "../sign-out-button";
-import PostInterestButton from "./post-interest-button";
 import AdminNav from "./admin-nav";
+import { Users, FileText, AlertCircle, DollarSign, ArrowUpRight } from "lucide-react";
 
 function fmt(amount: number) {
   return (amount || 0).toLocaleString("en-PH", {
@@ -39,8 +40,8 @@ export default async function AdminPage() {
     { data: interestShares },
     { data: activeLoans },
     { data: approvedPayments },
-    { data: interestPayments },
     { count: unpaidMembersCount },
+    { data: penaltyData },
   ] = await Promise.all([
     supabase
       .from("contributions")
@@ -57,24 +58,24 @@ export default async function AdminPage() {
       .eq("status", "approved"),
     // Fetch total member interest earnings from member_interest_shares
     supabase.from("member_interest_shares").select("amount"),
-    // Fetch active loans using principal_amount and base_interest_rate from schema
+    // Fetch active loans using principal_amount
     supabase
       .from("loans")
       .select("id, principal_amount, base_interest_rate, referral_fee_rate")
       .in("status", ["approved", "active", "disbursed", "Approved", "Active"]),
-    // Fetch approved payments to subtract principal already paid back
+    // Fetch approved payments to subtract principal already paid back and gather interest/penalties if applicable
     supabase
       .from("loan_payments")
-      .select("loan_id, principal_portion, interest_portion")
+      .select("loan_id, principal_portion, interest_portion, penalty_amount, status")
       .eq("status", "approved"),
-    // Fetch posted monthly loan interest records
-    supabase
-      .from("loan_interest_payments")
-      .select("interest_amount, pool_amount"),
     supabase
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .eq("has_pending_contribution", true),
+    // Fetch penalties from loan payments or a dedicated penalties table (adjust table/field name if stored differently)
+    supabase
+      .from("loan_payments")
+      .select("penalty_amount")
   ]);
 
   // 1. Total Approved Contributions
@@ -89,13 +90,16 @@ export default async function AdminPage() {
     0
   );
 
-  // Map principal paid per loan
+  // Map principal and interest paid per loan
   const principalPaidMap: Record<string, number> = {};
+  let totalInterestIncome = 0;
+  
   (approvedPayments ?? []).forEach((p) => {
     if (p.loan_id) {
       principalPaidMap[p.loan_id] =
         (principalPaidMap[p.loan_id] || 0) + Number(p.principal_portion || 0);
     }
+    totalInterestIncome += Number(p.interest_portion || 0);
   });
 
   // 3. Outstanding Active Principal
@@ -105,9 +109,9 @@ export default async function AdminPage() {
     return sum + remaining;
   }, 0);
 
-  // 4. Total Interest Earned across Posted Loans
-  const activeInterest = (interestPayments ?? []).reduce(
-    (sum, i) => sum + Number(i.interest_amount || 0),
+  // 4. Total Penalties Collected / Recorded
+  const totalPenalties = (penaltyData ?? []).reduce(
+    (sum, p) => sum + Number(p.penalty_amount || 0),
     0
   );
 
@@ -120,7 +124,7 @@ export default async function AdminPage() {
         <div className="dashboard-hero">
           <div>
             <span className="badge admin">ADMIN DASHBOARD</span>
-            <h1>Welcome back, {profile?.first_name ?? "Admin"}</h1>
+            <h1>Welcome back, {profile?.first_name ?? "Admin"}[cite: 2]</h1>
             <p style={{ margin: "4px 0 0", color: "var(--text-sub)", fontSize: 13.5 }}>
               {user.email}
             </p>
@@ -130,8 +134,66 @@ export default async function AdminPage() {
           </div>
         </div>
 
+        {/* Quick Administrative Links / Suggestions */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
+          <Link
+            href="/admin/contributions"
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              padding: "10px 16px",
+              borderRadius: 12,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+              color: "var(--text-main)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <FileText size={15} color="#3b82f6" /> Manage Contributions <ArrowUpRight size={14} />
+          </Link>
+          <Link
+            href="/admin/loans"
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              padding: "10px 16px",
+              borderRadius: 12,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+              color: "var(--text-main)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <DollarSign size={15} color="#f59e0b" /> Manage Loans <ArrowUpRight size={14} />
+          </Link>
+          <Link
+            href="/admin/members"
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              padding: "10px 16px",
+              borderRadius: 12,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+              color: "var(--text-main)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Users size={15} color="#10b981" /> View Members Directory <ArrowUpRight size={14} />
+          </Link>
+        </div>
+
         {/* Action Queue Badges */}
-        <div className="section-title">Pending Approvals</div>
+        <div className="section-title">Pending Approvals & System Queue</div>
         <div className="grid-cards">
           <div className="stat-card">
             <div className="label">Pending Contributions</div>
@@ -173,19 +235,16 @@ export default async function AdminPage() {
           </div>
           <div className="stat-card">
             <div className="label">Total Interest Income</div>
-            <div className="value">{fmt(activeInterest)}</div>
+            <div className="value">{fmt(totalInterestIncome)}</div>
           </div>
-        </div>
-
-        {/* Interest Automation Card */}
-        <div className="stat-card" style={{ marginTop: 28, padding: 20 }}>
-          <div className="section-title" style={{ margin: "0 0 6px" }}>
-            Monthly Interest Distribution
+          <div className="stat-card" style={{ borderColor: totalPenalties > 0 ? "rgba(239, 68, 68, 0.3)" : undefined }}>
+            <div className="label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <AlertCircle size={14} color="#ef4444" /> Total Penalties Collected
+            </div>
+            <div className="value" style={{ color: totalPenalties > 0 ? "#ef4444" : "inherit" }}>
+              {fmt(totalPenalties)}
+            </div>
           </div>
-          <p style={{ margin: "0 0 16px", color: "var(--text-sub)", fontSize: 13 }}>
-            Posts monthly interest across all active loans and distributes earnings by contribution shares.
-          </p>
-          <PostInterestButton />
         </div>
       </div>
     </div>
