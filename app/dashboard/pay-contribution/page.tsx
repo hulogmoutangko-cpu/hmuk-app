@@ -17,7 +17,7 @@ export default function PayContributionPage() {
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [amount, setAmount] = useState("");
   
-  // UI ONLY: Due date is selectable for calculation, payDate is locked to today
+  // Due date is selectable, payDate is locked to today
   const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
   const [payDate] = useState(new Date().toISOString().slice(0, 10));
   
@@ -85,7 +85,7 @@ export default function PayContributionPage() {
     }
   }
 
-  const penaltyPerAccount = isLate ? parsedAmount * 0.10 : 0; // 10% Penalty (e.g., 30 pesos)
+  const penaltyPerAccount = isLate ? parsedAmount * 0.10 : 0; // 10% Penalty
   const totalPerAccount = parsedAmount + penaltyPerAccount;
   const calculatedTotal = totalPerAccount * selectedAccountIds.length;
 
@@ -134,11 +134,12 @@ export default function PayContributionPage() {
         data: { publicUrl },
       } = supabase.storage.from("contribution-signatures").getPublicUrl(path);
 
-      // 2. Loop through each selected account and call our secure database function (RPC)
+      // 2. Loop through each selected account and call the updated RPC function
       for (const accId of selectedAccountIds) {
         const { error: rpcError } = await supabase.rpc("create_contribution_with_penalty", {
           p_account_id: accId,
           p_amount: parsedAmount,
+          p_due_date: dueDate,        // Saved to track payment targets
           p_pay_date: payDate,
           p_signature_url: publicUrl,
           p_penalty_amount: isLate ? penaltyPerAccount : 0,
