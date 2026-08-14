@@ -29,6 +29,7 @@ function fmt(amount: number) {
 
 export default async function DashboardPage() {
   const supabase = await createClient();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -37,6 +38,9 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  // ---------------------------------------------------------
+  // GET PROFILE
+  // ---------------------------------------------------------
   const { data: profile } = await supabase
     .from("profiles")
     .select(
@@ -45,17 +49,23 @@ export default async function DashboardPage() {
     .eq("id", user.id)
     .single();
 
+  // Admins should go to the admin dashboard
   if (profile?.role === "admin") {
     redirect("/admin");
   }
 
-  // Fetch Unread Notification Count
+  // ---------------------------------------------------------
+  // UNREAD NOTIFICATIONS
+  // ---------------------------------------------------------
   const { count: unreadCount } = await supabase
     .from("user_notifications")
     .select("*", { count: "exact", head: true })
     .eq("user_id", user.id)
     .eq("is_read", false);
 
+  // ---------------------------------------------------------
+  // GET USER'S CO-OP ACCOUNTS
+  // ---------------------------------------------------------
   const { data: accounts } = await supabase
     .from("coop_accounts")
     .select("id, account_name, created_at")
@@ -64,71 +74,132 @@ export default async function DashboardPage() {
 
   const accountIds = (accounts ?? []).map((a) => a.id);
 
+  // ---------------------------------------------------------
+  // FINANCIAL VARIABLES
+  // ---------------------------------------------------------
   let totalContribution = 0;
   let interestEarned = 0;
   let interestPerAccountShare = 0;
   let currentLoanAmount = 0;
   let referralBonusEarned = 0;
 
+  // ---------------------------------------------------------
+  // USER FINANCIAL DATA
+  // ---------------------------------------------------------
   if (accountIds.length > 0) {
-    // Fetch contributions, loans, all approved payment interest portions, all penalties, and total coop accounts
+    /*
+     * IMPORTANT:
+     *
+     * We do NOT calculate the system-wide account count,
+     * interest, and penalties directly from normal Supabase
+     * queries because RLS can restrict those queries to only
+     * the current user's rows.
+     *
+     * Instead, get_interest_pool_stats() is a SECURITY DEFINER
+     * RPC that safely returns:
+     *
+     *   - total_accounts
+     *   - total_interest
+     *   - total_penalties
+     *
+     * This allows the correct system-wide calculation.
+     */
+
     const [
       { data: contributions },
       { data: loans },
-      { data: allApprovedPayments },
-      { data: allPenalties },
-      { count: totalSystemAccounts },
+      { data: interestPool },
     ] = await Promise.all([
+      // -----------------------------------------------------
+      // USER CONTRIBUTIONS
+      // -----------------------------------------------------
       supabase
         .from("contributions")
         .select("amount")
         .in("account_id", accountIds)
         .eq("status", "approved"),
+
+      // -----------------------------------------------------
+      // USER ACTIVE / APPROVED LOANS
+      // -----------------------------------------------------
       supabase
         .from("loans")
         .select("id, principal_amount")
         .in("account_id", accountIds)
-        .in("status", ["approved", "active", "disbursed", "Approved", "Active"]),
-      supabase
-        .from("loan_payments")
-        .select("interest_portion")
-        .eq("status", "approved"),
-      supabase
-        .from("penalties")
-        .select("amount"),
-      supabase
-        .from("coop_accounts")
-        .select("*", { count: "exact", head: true }),
+        .in("status", [
+          "approved",
+          "active",
+          "disbursed",
+          "Approved",
+          "Active",
+        ]),
+
+      // -----------------------------------------------------
+      // SYSTEM-WIDE INTEREST + PENALTIES + ACCOUNT COUNT
+      // -----------------------------------------------------
+      supabase.rpc("get_interest_pool_stats"),
     ]);
 
+    // ---------------------------------------------------------
+    // TOTAL USER CONTRIBUTIONS
+    // ---------------------------------------------------------
     totalContribution = (contributions ?? []).reduce(
       (sum, c) => sum + Number(c.amount || 0),
       0
     );
 
-    // Sum total approved interest portions and approved penalties system-wide
-    const totalApprovedInterest = (allApprovedPayments ?? []).reduce(
-      (sum, p) => sum + Number(p.interest_portion || 0),
-      0
+    // ---------------------------------------------------------
+    // READ SYSTEM-WIDE INTEREST POOL
+    // ---------------------------------------------------------
+    const poolStats = interestPool?.[0];
+
+    const totalSystemAccounts = Number(
+      poolStats?.total_accounts || 0
     );
 
-    const totalPenaltiesSum = (allPenalties ?? []).reduce(
-      (sum, pen) => sum + Number(pen.amount || 0),
-      0
+    const totalApprovedInterest = Number(
+      poolStats?.total_interest || 0
     );
 
-    const totalSystemPool = totalApprovedInterest + totalPenaltiesSum;
-    
-    // Ensure we divide by the exact total system accounts count
-    const systemAccountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
-    
-    // Exact Interest earned per account: (Total Interest + Penalties) / Total System Accounts
-    interestPerAccountShare = totalSystemPool / systemAccountCount;
+    const totalPenaltiesSum = Number(
+      poolStats?.total_penalties || 0
+    );
 
-    // Total interest earned by this user: Per-account share * User's specific account count
-    interestEarned = interestPerAccountShare * accountIds.length;
+    // ---------------------------------------------------------
+    // TOTAL DISTRIBUTABLE POOL
+    // ---------------------------------------------------------
+    const totalSystemPool =
+      totalApprovedInterest + totalPenaltiesSum;
 
+    /*
+     * IMPORTANT:
+     *
+     * Example:
+     *
+     * totalSystemPool = ₱2,050
+     * totalSystemAccounts = 20
+     *
+     * ₱2,050 / 20 = ₱102.50 per account
+     */
+    const systemAccountCount =
+      totalSystemAccounts > 0 ? totalSystemAccounts : 1;
+
+    interestPerAccountShare =
+      totalSystemPool / systemAccountCount;
+
+    /*
+     * User owns 10 accounts:
+     *
+     * ₱102.50 × 10 = ₱1,025
+     */
+    interestEarned =
+      interestPerAccountShare * accountIds.length;
+
+    // ---------------------------------------------------------
+    // USER LOAN BALANCE
+    // ---------------------------------------------------------
     const activeLoanIds = (loans ?? []).map((l) => l.id);
+
     let totalPrincipalPaid = 0;
 
     if (activeLoanIds.length > 0) {
@@ -144,28 +215,45 @@ export default async function DashboardPage() {
       );
     }
 
+    // ---------------------------------------------------------
+    // TOTAL PRINCIPAL ISSUED TO USER
+    // ---------------------------------------------------------
     const totalPrincipalIssued = (loans ?? []).reduce(
       (sum, l) => sum + Number(l.principal_amount || 0),
       0
     );
 
-    currentLoanAmount = Math.max(0, totalPrincipalIssued - totalPrincipalPaid);
+    // ---------------------------------------------------------
+    // CURRENT LOAN BALANCE
+    // ---------------------------------------------------------
+    currentLoanAmount = Math.max(
+      0,
+      totalPrincipalIssued - totalPrincipalPaid
+    );
   }
 
-  // Safe Referral Earnings
+  // ---------------------------------------------------------
+  // REFERRAL EARNINGS
+  // ---------------------------------------------------------
   const { data: referredLoans } = await supabase
     .from("loans")
     .select("id")
     .eq("referred_by", user.id);
 
-  const referredLoanIds = (referredLoans ?? []).map((l) => l.id);
+  const referredLoanIds = (referredLoans ?? []).map(
+    (l) => l.id
+  );
 
   if (referredLoanIds.length > 0) {
-    const [{ data: intPayments }, { data: standardPayments }] = await Promise.all([
+    const [
+      { data: intPayments },
+      { data: standardPayments },
+    ] = await Promise.all([
       supabase
         .from("loan_interest_payments")
         .select("referral_amount")
         .in("loan_id", referredLoanIds),
+
       supabase
         .from("loan_payments")
         .select("referral_portion, referral_amount")
@@ -179,13 +267,18 @@ export default async function DashboardPage() {
     );
 
     const sum2 = (standardPayments ?? []).reduce(
-      (sum, r) => sum + Number(r.referral_portion || r.referral_amount || 0),
+      (sum, r) =>
+        sum +
+        Number(r.referral_portion || r.referral_amount || 0),
       0
     );
 
     referralBonusEarned = sum1 + sum2;
   }
 
+  // ---------------------------------------------------------
+  // PAGE
+  // ---------------------------------------------------------
   return (
     <div
       style={{
@@ -203,7 +296,9 @@ export default async function DashboardPage() {
           padding: "16px 16px 24px",
         }}
       >
-        {/* App Top Header Bar */}
+        {/* =====================================================
+            APP TOP HEADER BAR
+        ===================================================== */}
         <div
           style={{
             display: "flex",
@@ -212,7 +307,13 @@ export default async function DashboardPage() {
             marginBottom: 20,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
             <Image
               src="/icons/logo.png"
               alt="Logo"
@@ -220,12 +321,25 @@ export default async function DashboardPage() {
               height={36}
               style={{ objectFit: "contain" }}
             />
-            <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: 0.5 }}>
+
+            <span
+              style={{
+                fontWeight: 800,
+                fontSize: 16,
+                letterSpacing: 0.5,
+              }}
+            >
               HMUK PORTAL
             </span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
             <div style={{ transform: "scale(0.9)" }}>
               <ThemeToggle />
             </div>
@@ -247,6 +361,7 @@ export default async function DashboardPage() {
               }}
             >
               <Bell size={18} />
+
               {(unreadCount ?? 0) > 0 && (
                 <span
                   style={{
@@ -277,10 +392,13 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Member Profile Hero Card */}
+        {/* =====================================================
+            MEMBER PROFILE HERO CARD
+        ===================================================== */}
         <div
           style={{
-            background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+            background:
+              "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
             borderRadius: 20,
             padding: 20,
             color: "#ffffff",
@@ -290,7 +408,13 @@ export default async function DashboardPage() {
             overflow: "hidden",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+            }}
+          >
             {profile?.profile_picture_url ? (
               <img
                 src={profile.profile_picture_url}
@@ -318,9 +442,12 @@ export default async function DashboardPage() {
                   border: "2px solid rgba(255,255,255,0.2)",
                 }}
               >
-                {profile?.first_name ? profile.first_name[0] : "M"}
+                {profile?.first_name
+                  ? profile.first_name[0]
+                  : "M"}
               </div>
             )}
+
             <div>
               <div
                 style={{
@@ -333,17 +460,33 @@ export default async function DashboardPage() {
               >
                 Member Account
               </div>
-              <h1 style={{ fontSize: 20, fontWeight: 700, margin: "2px 0" }}>
+
+              <h1
+                style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  margin: "2px 0",
+                }}
+              >
                 {profile?.first_name} {profile?.last_name}
               </h1>
-              <p style={{ margin: 0, opacity: 0.7, fontSize: 12 }}>
+
+              <p
+                style={{
+                  margin: 0,
+                  opacity: 0.7,
+                  fontSize: 12,
+                }}
+              >
                 {user.email}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Financial Overview Grid Cards */}
+        {/* =====================================================
+            FINANCIAL OVERVIEW
+        ===================================================== */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
@@ -355,6 +498,7 @@ export default async function DashboardPage() {
           >
             Financial Overview
           </div>
+
           <div
             style={{
               display: "grid",
@@ -362,7 +506,9 @@ export default async function DashboardPage() {
               gap: 12,
             }}
           >
-            {/* Total Contributions */}
+            {/* -------------------------------------------------
+                TOTAL CONTRIBUTIONS
+            ------------------------------------------------- */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -386,9 +532,17 @@ export default async function DashboardPage() {
               >
                 <Wallet size={20} />
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-sub)",
+                  fontWeight: 500,
+                }}
+              >
                 Total Contributions
               </div>
+
               <div
                 style={{
                   fontSize: 16,
@@ -401,7 +555,9 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* Interest Earned */}
+            {/* -------------------------------------------------
+                INTEREST EARNED
+            ------------------------------------------------- */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -425,9 +581,17 @@ export default async function DashboardPage() {
               >
                 <TrendingUp size={20} />
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-sub)",
+                  fontWeight: 500,
+                }}
+              >
                 Interest Earned
               </div>
+
               <div
                 style={{
                   fontSize: 16,
@@ -438,12 +602,21 @@ export default async function DashboardPage() {
               >
                 {fmt(interestEarned)}
               </div>
-              <div style={{ fontSize: 10, color: "var(--text-sub)", marginTop: 2 }}>
+
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-sub)",
+                  marginTop: 2,
+                }}
+              >
                 ({fmt(interestPerAccountShare)} per account)
               </div>
             </div>
 
-            {/* Active Loan Balance */}
+            {/* -------------------------------------------------
+                ACTIVE LOAN BALANCE
+            ------------------------------------------------- */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -467,9 +640,17 @@ export default async function DashboardPage() {
               >
                 <CreditCard size={20} />
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-sub)",
+                  fontWeight: 500,
+                }}
+              >
                 Loan Balance
               </div>
+
               <div
                 style={{
                   fontSize: 16,
@@ -482,7 +663,9 @@ export default async function DashboardPage() {
               </div>
             </div>
 
-            {/* Referral Bonus */}
+            {/* -------------------------------------------------
+                REFERRAL BONUS
+            ------------------------------------------------- */}
             <div
               style={{
                 background: "var(--bg-card)",
@@ -506,9 +689,17 @@ export default async function DashboardPage() {
               >
                 <Gift size={20} />
               </div>
-              <div style={{ fontSize: 12, color: "var(--text-sub)", fontWeight: 500 }}>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-sub)",
+                  fontWeight: 500,
+                }}
+              >
                 Referral Bonus
               </div>
+
               <div
                 style={{
                   fontSize: 16,
@@ -523,7 +714,9 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Quick Actions */}
+        {/* =====================================================
+            QUICK ACTIONS
+        ===================================================== */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
@@ -543,9 +736,13 @@ export default async function DashboardPage() {
               gap: 8,
             }}
           >
+            {/* + ACCOUNT */}
             <Link
               href="/dashboard/new-account"
-              style={{ textDecoration: "none", textAlign: "center" }}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+              }}
             >
               <div
                 style={{
@@ -563,14 +760,25 @@ export default async function DashboardPage() {
               >
                 <PlusCircle size={20} />
               </div>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                }}
+              >
                 + Account
               </span>
             </Link>
 
+            {/* DEPOSIT */}
             <Link
               href="/dashboard/pay-contribution"
-              style={{ textDecoration: "none", textAlign: "center" }}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+              }}
             >
               <div
                 style={{
@@ -588,14 +796,25 @@ export default async function DashboardPage() {
               >
                 <PiggyBank size={20} />
               </div>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                }}
+              >
                 Deposit
               </span>
             </Link>
 
+            {/* APPLY LOAN */}
             <Link
               href="/dashboard/apply-loan"
-              style={{ textDecoration: "none", textAlign: "center" }}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+              }}
             >
               <div
                 style={{
@@ -613,14 +832,25 @@ export default async function DashboardPage() {
               >
                 <FileText size={20} />
               </div>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                }}
+              >
                 Apply Loan
               </span>
             </Link>
 
+            {/* PAY LOAN */}
             <Link
               href="/dashboard/pay-loan"
-              style={{ textDecoration: "none", textAlign: "center" }}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+              }}
             >
               <div
                 style={{
@@ -638,14 +868,25 @@ export default async function DashboardPage() {
               >
                 <DollarSign size={20} />
               </div>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                }}
+              >
                 Pay Loan
               </span>
             </Link>
 
+            {/* HISTORY */}
             <Link
               href="/dashboard/history"
-              style={{ textDecoration: "none", textAlign: "center" }}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+              }}
             >
               <div
                 style={{
@@ -663,14 +904,23 @@ export default async function DashboardPage() {
               >
                 <TrendingUp size={20} />
               </div>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-sub)" }}>
+
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--text-sub)",
+                }}
+              >
                 History
               </span>
             </Link>
           </div>
         </div>
 
-        {/* Registered Accounts List */}
+        {/* =====================================================
+            REGISTERED ACCOUNTS
+        ===================================================== */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
@@ -700,7 +950,8 @@ export default async function DashboardPage() {
                   fontSize: 13,
                 }}
               >
-                No accounts found. Create your first co-op account above to begin contributing.
+                No accounts found. Create your first co-op
+                account above to begin contributing.
               </div>
             ) : (
               (accounts ?? []).map((a, idx) => (
@@ -717,7 +968,13 @@ export default async function DashboardPage() {
                         : "none",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
                     <div
                       style={{
                         width: 38,
@@ -732,12 +989,27 @@ export default async function DashboardPage() {
                     >
                       <Building size={18} />
                     </div>
+
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 14,
+                        }}
+                      >
                         {a.account_name}
                       </div>
-                      <div style={{ fontSize: 12, color: "var(--text-sub)" }}>
-                        Created {new Date(a.created_at).toLocaleDateString()}
+
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-sub)",
+                        }}
+                      >
+                        Created{" "}
+                        {new Date(
+                          a.created_at
+                        ).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
@@ -747,7 +1019,9 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Referral Program Section */}
+        {/* =====================================================
+            REFERRAL PROGRAM
+        ===================================================== */}
         <div style={{ marginBottom: 16 }}>
           <div
             style={{
@@ -759,11 +1033,14 @@ export default async function DashboardPage() {
           >
             Referral Program
           </div>
+
           <ReferralShareCard />
         </div>
       </div>
 
-      {/* Floating Bottom App Nav Bar */}
+      {/* =======================================================
+          FLOATING BOTTOM APP NAV BAR
+      ======================================================= */}
       <div
         style={{
           position: "fixed",
@@ -780,6 +1057,7 @@ export default async function DashboardPage() {
           zIndex: 100,
         }}
       >
+        {/* HOME */}
         <Link
           href="/dashboard"
           style={{
@@ -792,9 +1070,18 @@ export default async function DashboardPage() {
           }}
         >
           <Home size={20} />
-          <span style={{ fontSize: 10, fontWeight: 600 }}>Home</span>
+
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+            }}
+          >
+            Home
+          </span>
         </Link>
 
+        {/* SAVINGS */}
         <Link
           href="/dashboard/pay-contribution"
           style={{
@@ -807,9 +1094,18 @@ export default async function DashboardPage() {
           }}
         >
           <PiggyBank size={20} />
-          <span style={{ fontSize: 10, fontWeight: 600 }}>Savings</span>
+
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+            }}
+          >
+            Savings
+          </span>
         </Link>
 
+        {/* LOANS */}
         <Link
           href="/dashboard/apply-loan"
           style={{
@@ -822,7 +1118,15 @@ export default async function DashboardPage() {
           }}
         >
           <CreditCard size={20} />
-          <span style={{ fontSize: 10, fontWeight: 600 }}>Loans</span>
+
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+            }}
+          >
+            Loans
+          </span>
         </Link>
       </div>
     </div>
