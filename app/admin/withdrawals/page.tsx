@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
-import AdminNav from "../../admin-nav";
+import AdminNav from "./../admin-nav";
 import { Users, ArrowRight } from "lucide-react";
 
 export default async function WithdrawalsListPage() {
