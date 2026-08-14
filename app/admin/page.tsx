@@ -40,8 +40,9 @@ export default async function AdminPage() {
     { data: interestShares },
     { data: activeLoans },
     { data: approvedPayments },
+    { data: interestPayments },
     { count: unpaidMembersCount },
-    { data: penaltyData },
+    { data: penaltiesList },
   ] = await Promise.all([
     supabase
       .from("contributions")
@@ -56,26 +57,24 @@ export default async function AdminPage() {
       .from("contributions")
       .select("amount")
       .eq("status", "approved"),
-    // Fetch total member interest earnings from member_interest_shares
     supabase.from("member_interest_shares").select("amount"),
-    // Fetch active loans using principal_amount
     supabase
       .from("loans")
       .select("id, principal_amount, base_interest_rate, referral_fee_rate")
       .in("status", ["approved", "active", "disbursed", "Approved", "Active"]),
-    // Fetch approved payments to subtract principal already paid back and gather interest/penalties if applicable
     supabase
       .from("loan_payments")
-      .select("loan_id, principal_portion, interest_portion, penalty_amount, status")
+      .select("loan_id, principal_portion, interest_portion, status")
       .eq("status", "approved"),
+    supabase
+      .from("loan_interest_payments")
+      .select("interest_amount, pool_amount"),
     supabase
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .eq("has_pending_contribution", true),
-    // Fetch penalties from loan payments or a dedicated penalties table (adjust table/field name if stored differently)
-    supabase
-      .from("loan_payments")
-      .select("penalty_amount")
+    // Fetch from your actual 'penalties' table schema
+    supabase.from("penalties").select("amount"),
   ]);
 
   // 1. Total Approved Contributions
@@ -90,16 +89,13 @@ export default async function AdminPage() {
     0
   );
 
-  // Map principal and interest paid per loan
+  // Map principal paid per loan
   const principalPaidMap: Record<string, number> = {};
-  let totalInterestIncome = 0;
-  
   (approvedPayments ?? []).forEach((p) => {
     if (p.loan_id) {
       principalPaidMap[p.loan_id] =
         (principalPaidMap[p.loan_id] || 0) + Number(p.principal_portion || 0);
     }
-    totalInterestIncome += Number(p.interest_portion || 0);
   });
 
   // 3. Outstanding Active Principal
@@ -109,9 +105,15 @@ export default async function AdminPage() {
     return sum + remaining;
   }, 0);
 
-  // 4. Total Penalties Collected / Recorded
-  const totalPenalties = (penaltyData ?? []).reduce(
-    (sum, p) => sum + Number(p.penalty_amount || 0),
+  // 4. Total Interest Income from loan_interest_payments
+  const totalInterestIncome = (interestPayments ?? []).reduce(
+    (sum, i) => sum + Number(i.interest_amount || 0),
+    0
+  );
+
+  // 5. Total Penalties from the 'penalties' table
+  const totalPenalties = (penaltiesList ?? []).reduce(
+    (sum, p) => sum + Number(p.amount || 0),
     0
   );
 
@@ -124,7 +126,7 @@ export default async function AdminPage() {
         <div className="dashboard-hero">
           <div>
             <span className="badge admin">ADMIN DASHBOARD</span>
-            <h1>Welcome back, {profile?.first_name ?? "Admin"}[cite: 2]</h1>
+            <h1>Welcome back, {profile?.first_name ?? "Admin"}</h1>
             <p style={{ margin: "4px 0 0", color: "var(--text-sub)", fontSize: 13.5 }}>
               {user.email}
             </p>
@@ -134,7 +136,7 @@ export default async function AdminPage() {
           </div>
         </div>
 
-        {/* Quick Administrative Links / Suggestions */}
+        {/* Quick Administrative Links */}
         <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
           <Link
             href="/admin/contributions"
@@ -239,7 +241,7 @@ export default async function AdminPage() {
           </div>
           <div className="stat-card" style={{ borderColor: totalPenalties > 0 ? "rgba(239, 68, 68, 0.3)" : undefined }}>
             <div className="label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <AlertCircle size={14} color="#ef4444" /> Total Penalties Collected
+              <AlertCircle size={14} color="#ef4444" /> Total Penalties
             </div>
             <div className="value" style={{ color: totalPenalties > 0 ? "#ef4444" : "inherit" }}>
               {fmt(totalPenalties)}
