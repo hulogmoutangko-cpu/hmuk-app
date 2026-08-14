@@ -238,6 +238,7 @@ export default function PayLoanPage() {
                   period_month: inst.due_date || payDate,
                   interest_amount: instInterest,
                   posted_by: user.id,
+                  pool_amount: 0, // Added to satisfy the NOT NULL constraint
                 });
 
               if (interestError) throw interestError;
