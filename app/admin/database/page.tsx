@@ -15,7 +15,7 @@ export default function AdminDatabasePage() {
     message: "",
   });
 
-  const CONFIRMATION_KEYWORD = "RESET DATABASE";
+  const CONFIRMATION_KEYWORD = "RESET TRANSACTIONS";
 
   async function handleResetDatabase(e: React.FormEvent) {
     e.preventDefault();
@@ -32,20 +32,20 @@ export default function AdminDatabasePage() {
     setStatus({ type: null, message: "" });
 
     try {
-      // Execute Supabase RPC call to wipe testing data
-      const { error } = await supabase.rpc("reset_testing_database");
+      // Execute Supabase RPC call to wipe only transactional data
+      const { error } = await supabase.rpc("reset_transactional_database");
 
       if (error) throw error;
 
       setStatus({
         type: "success",
-        message: "Database successfully reset! All non-admin test data has been cleared.",
+        message: "Transactional database successfully reset! All ledger entries, loans, and contributions have been cleared.",
       });
       setConfirmText("");
     } catch (err: any) {
       setStatus({
         type: "error",
-        message: err.message || "Failed to reset database.",
+        message: err.message || "Failed to reset transactional database.",
       });
     } finally {
       setLoading(false);
@@ -84,7 +84,7 @@ export default function AdminDatabasePage() {
             Database Management
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Manage environment state and purge testing data.
+            Manage environment state and purge transaction records.
           </p>
         </div>
 
@@ -111,10 +111,10 @@ export default function AdminDatabasePage() {
             </div>
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#ef4444" }}>
-                Reset Test Environment
+                Reset Transactional Data
               </h2>
               <p style={{ margin: "2px 0 0", color: "var(--text-sub)", fontSize: 13 }}>
-                This action is destructive and irreversible.
+                This action will wipe financial logs and cannot be undone.
               </p>
             </div>
           </div>
@@ -130,9 +130,9 @@ export default function AdminDatabasePage() {
               marginBottom: 20,
             }}
           >
-            <li>All submitted loan applications and active contracts</li>
-            <li>All created cooperative member accounts</li>
-            <li>All non-admin profile records and registered test users</li>
+            <li>All contributions and payment history records</li>
+            <li>All loan applications, active contracts, and payment schedules</li>
+            <li>Member interest shares and system notifications</li>
           </ul>
 
           <div
@@ -150,7 +150,7 @@ export default function AdminDatabasePage() {
             }}
           >
             <CheckCircle2 size={16} />
-            <span>Admin accounts and system settings will be safely preserved.</span>
+            <span>Member accounts, user profiles, and system settings will remain safe.</span>
           </div>
 
           {/* Confirmation Form */}
@@ -162,7 +162,7 @@ export default function AdminDatabasePage() {
               type="text"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="RESET DATABASE"
+              placeholder="RESET TRANSACTIONS"
               style={{
                 padding: "10px 12px",
                 borderRadius: 8,
@@ -195,11 +195,11 @@ export default function AdminDatabasePage() {
             >
               {loading ? (
                 <>
-                  <RefreshCw size={16} className="animate-spin" /> Resetting Database...
+                  <RefreshCw size={16} className="animate-spin" /> Purging Transactions...
                 </>
               ) : (
                 <>
-                  <Database size={16} /> Purge Test Data
+                  <Database size={16} /> Purge Transaction Data
                 </>
               )}
             </button>
