@@ -1,4 +1,4 @@
-import CoopAccountWithdrawal from "../withdrawal-form";
+import CoopAccountWithdrawal from "./withdrawal-form";
 
 export default async function WithdrawalPage({ params }: { params: { id: string } }) {
   const { id } = params;
