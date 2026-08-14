@@ -25,10 +25,14 @@ type DueInfo = {
   is_final_installment: boolean;
 };
 
+// Formatter updated to round up/display without decimals
 function fmt(amount: number) {
-  return Number(amount).toLocaleString("en-PH", {
+  const wholeAmount = Math.ceil(Number(amount) || 0);
+  return wholeAmount.toLocaleString("en-PH", {
     style: "currency",
     currency: "PHP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 
@@ -48,7 +52,6 @@ export default function PayLoanPage() {
   const [loanId, setLoanId] = useState("");
   const [installments, setInstallments] = useState<DueInfo[]>([]);
   
-  // Selected months and payment modes mapped by installment number
   const [selectedMonths, setSelectedMonths] = useState<Record<number, boolean>>({});
   const [paymentModes, setPaymentModes] = useState<Record<number, "full" | "interest_only">>({});
 
@@ -112,7 +115,6 @@ export default function PayLoanPage() {
         const rows = data as DueInfo[];
         setInstallments(rows);
         
-        // Default check all available unpaid months and set default mode to "full"
         const initialSelected: Record<number, boolean> = {};
         const initialModes: Record<number, "full" | "interest_only"> = {};
         rows.forEach((r) => {
@@ -130,7 +132,7 @@ export default function PayLoanPage() {
     loadDue();
   }, [loanId, supabase]);
 
-  // Automatically compute and update totals whenever checkboxes or payment modes change
+  // Automatically compute and update rounded-up totals
   useEffect(() => {
     let totalPrincipal = 0;
     let totalInterestAndPenalties = 0;
@@ -143,18 +145,17 @@ export default function PayLoanPage() {
           totalPrincipal += Number(inst.principal_due || 0);
         }
 
-        // Monthly base interest
         totalInterestAndPenalties += Number(inst.interest_due || 0);
 
-        // Extra interest & penalties apply only if final installment and overdue
         if (inst.is_final_installment) {
           totalInterestAndPenalties += Number(inst.extra_interest_due || 0) + Number(inst.penalty_due || 0);
         }
       }
     });
 
-    setPrincipalPortion(totalPrincipal.toFixed(2));
-    setInterestPortion(totalInterestAndPenalties.toFixed(2));
+    // Use Math.ceil to round up to the next whole number
+    setPrincipalPortion(Math.ceil(totalPrincipal).toString());
+    setInterestPortion(Math.ceil(totalInterestAndPenalties).toString());
   }, [selectedMonths, paymentModes, installments]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -165,8 +166,8 @@ export default function PayLoanPage() {
       setError("Select a loan to pay toward.");
       return;
     }
-    const principal = Number(principalPortion || 0);
-    const interest = Number(interestPortion || 0);
+    const principal = Math.ceil(Number(principalPortion || 0));
+    const interest = Math.ceil(Number(interestPortion || 0));
     if (principal <= 0 && interest <= 0) {
       setError("Enter at least a principal or interest amount.");
       return;
@@ -224,8 +225,8 @@ export default function PayLoanPage() {
     }
   }
 
-  const currentPrincipal = Number(principalPortion) || 0;
-  const currentInterest = Number(interestPortion) || 0;
+  const currentPrincipal = Math.ceil(Number(principalPortion) || 0);
+  const currentInterest = Math.ceil(Number(interestPortion) || 0);
   const totalPayment = currentPrincipal + currentInterest;
 
   return (
@@ -271,7 +272,7 @@ export default function PayLoanPage() {
             Pay Loan
           </h1>
           <p style={{ margin: 0, color: "var(--text-sub)", fontSize: 13 }}>
-            Select the month(s) you wish to pay using the checkboxes below. Totals calculate automatically.
+            Select the month(s) you wish to pay. Amounts are automatically rounded up to whole numbers.
           </p>
         </div>
 
@@ -297,7 +298,6 @@ export default function PayLoanPage() {
           <p style={{ color: "var(--text-sub)", fontSize: 14 }}>You don't have any active loans to pay.</p>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
-            {/* Loan Select */}
             <div>
               <label
                 style={{
@@ -333,7 +333,6 @@ export default function PayLoanPage() {
               </select>
             </div>
 
-            {/* Checkbox Selection List for Installment Months */}
             {installments.length > 0 && (
               <div style={{ display: "grid", gap: 10 }}>
                 <label
@@ -453,7 +452,6 @@ export default function PayLoanPage() {
               </div>
             )}
 
-            {/* Editable Input Fields for Submitting */}
             <div style={{ display: "grid", gap: 12, marginTop: 4 }}>
               <div>
                 <label
@@ -469,8 +467,7 @@ export default function PayLoanPage() {
                 </label>
                 <input
                   type="number"
-                  min="0"
-                  step="0.01"
+                  step="1"
                   value={principalPortion}
                   onChange={(e) => setPrincipalPortion(e.target.value)}
                   style={{
@@ -500,8 +497,7 @@ export default function PayLoanPage() {
                 </label>
                 <input
                   type="number"
-                  min="0"
-                  step="0.01"
+                  step="1"
                   value={interestPortion}
                   onChange={(e) => setInterestPortion(e.target.value)}
                   style={{
