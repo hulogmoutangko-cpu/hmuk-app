@@ -66,11 +66,12 @@ export default async function DashboardPage() {
 
   let totalContribution = 0;
   let interestEarned = 0;
+  let interestPerAccountShare = 0;
   let currentLoanAmount = 0;
   let referralBonusEarned = 0;
 
   if (accountIds.length > 0) {
-    // 1. Fetch contributions, user's loans, and total pool metrics (approved interest + penalties / total accounts)
+    // Fetch contributions, loans, all approved payment interest portions, all penalties, and total coop accounts
     const [
       { data: contributions },
       { data: loans },
@@ -105,7 +106,7 @@ export default async function DashboardPage() {
       0
     );
 
-    // Calculate dynamic pool share: (Sum of approved interest portions + Sum of penalties) / Total coop accounts
+    // Sum total approved interest portions and approved penalties system-wide
     const totalApprovedInterest = (allApprovedPayments ?? []).reduce(
       (sum, p) => sum + Number(p.interest_portion || 0),
       0
@@ -117,10 +118,12 @@ export default async function DashboardPage() {
     );
 
     const accountCount = totalSystemAccounts && totalSystemAccounts > 0 ? totalSystemAccounts : 1;
-    const poolSharePerAccount = (totalApprovedInterest + totalPenaltiesSum) / accountCount;
+    
+    // Interest earned per individual coop account
+    interestPerAccountShare = (totalApprovedInterest + totalPenaltiesSum) / accountCount;
 
-    // Multiply user's personal account count by the pool share per account to get total interest earned
-    interestEarned = poolSharePerAccount * accountIds.length;
+    // Total interest earned by this user is their account count multiplied by the per-account share
+    interestEarned = interestPerAccountShare * accountIds.length;
 
     const activeLoanIds = (loans ?? []).map((l) => l.id);
     let totalPrincipalPaid = 0;
@@ -435,6 +438,9 @@ export default async function DashboardPage() {
                 }}
               >
                 {fmt(interestEarned)}
+              </div>
+              <div style={{ fontSize: 10, color: "var(--text-sub)", marginTop: 2 }}>
+                ({fmt(interestPerAccountShare)} per account)
               </div>
             </div>
 
